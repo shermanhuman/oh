@@ -23,14 +23,14 @@ Environment-level rules and skills that apply across all your projects — thing
 
 ### Skills
 
-| Skill                 | Description                                                                |
-| --------------------- | -------------------------------------------------------------------------- |
-| `phoenix-contexts`    | Phoenix context boundary pattern — keeps Repo/Ecto.Query out of LiveViews  |
-| `promptherder`        | CLI reference for managing agent rules, skills, and workflows across tools |
-| `waxseal`             | SealedSecrets management with GSM as source of truth                       |
-| `groq-whisper`        | Groq's Whisper transcription API — models, prompt engineering for jargon   |
-| `postmark-email`      | Postmark transactional email API — sending, attachments, batch             |
-| `telnyx-call-control` | Telnyx Voice API v2 — call handling, recording, webhook events             |
+| Skill                 | Description                                                              |
+| --------------------- | ------------------------------------------------------------------------ |
+| `groq-api`            | Groq API syntax — Whisper transcription, audio processing                |
+| `phoenix`             | Core Phoenix patterns — context boundaries, LiveView, Ecto, architecture |
+| `postmark-api`        | Postmark API syntax — transactional emails, batch, attachments           |
+| `promptherder`        | CLI reference for syncing agent rules, skills, and workflows             |
+| `telnyx-call-control` | Telnyx Voice API v2 — call handling, recording, webhook events           |
+| `waxseal`             | SealedSecrets management with GSM as source of truth                     |
 
 ### Rules
 
@@ -42,11 +42,11 @@ _None yet — add project-environment rules as needed._
 oh/
 ├── herd.json
 ├── skills/
-│   ├── groq-whisper/
+│   ├── groq-api/
 │   │   └── SKILL.md
-│   ├── phoenix-contexts/
+│   ├── phoenix/
 │   │   └── SKILL.md
-│   ├── postmark-email/
+│   ├── postmark-api/
 │   │   └── SKILL.md
 │   ├── promptherder/
 │   │   └── SKILL.md
