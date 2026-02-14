@@ -23,9 +23,12 @@ Environment-level rules and skills that apply across all your projects — thing
 
 ### Skills
 
-| Skill     | Description                                          |
-| --------- | ---------------------------------------------------- |
-| `waxseal` | SealedSecrets management with GSM as source of truth |
+| Skill                 | Description                                                              |
+| --------------------- | ------------------------------------------------------------------------ |
+| `waxseal`             | SealedSecrets management with GSM as source of truth                     |
+| `groq-whisper`        | Groq's Whisper transcription API — models, prompt engineering for jargon |
+| `postmark-email`      | Postmark transactional email API — sending, attachments, batch           |
+| `telnyx-call-control` | Telnyx Voice API v2 — call handling, recording, webhook events           |
 
 ### Rules
 
@@ -35,10 +38,16 @@ _None yet — add project-environment rules as needed._
 
 ```
 oh/
-├── herd.json           # Herd metadata
+├── herd.json
 ├── skills/
+│   ├── groq-whisper/
+│   │   └── SKILL.md
+│   ├── postmark-email/
+│   │   └── SKILL.md
+│   ├── telnyx-call-control/
+│   │   └── SKILL.md
 │   └── waxseal/
-│       └── SKILL.md    # WaxSeal SealedSecrets management
+│       └── SKILL.md
 └── rules/              # (future: cross-project rules)
 ```
 
