@@ -1,6 +1,6 @@
 ---
-name: phoenix-contexts
-description: The core Phoenix architecture pattern — the two-sided split between business logic (contexts) and web interface. Use when building, reviewing, or refactoring any Phoenix application.
+name: phoenix
+description: Core Phoenix framework patterns — context boundaries, LiveView, Ecto, and application architecture. Use when building, reviewing, or refactoring Phoenix applications.
 ---
 
 # Phoenix Two-Sided Split

@@ -5,23 +5,27 @@ description: Reference for the promptherder CLI — syncs AI agent rules, skills
 
 # Promptherder
 
-Go CLI that syncs rules, skills, and workflows from **herd repos** to **agent targets**.
+Go CLI that manages AI agent configuration per repo. `.promptherder/` is the **source of truth** for each repository's agent rules, skills, and workflows.
 
 ## How It Works
 
 ```
-Herd repos (GitHub)              Agent targets (local)
+Sources                          Agent targets (local)
 ┌──────────────┐
-│ compound-v   │──┐
-└──────────────┘  ├──→  .agent/         (Antigravity)
+│ herds (GitHub)│──┐
+└──────────────┘  │
+                  ├──→  .agent/         (Antigravity)
 ┌──────────────┐  ├──→  .github/        (Copilot)
-│ oh           │──┘
+│ repo-local   │──┘
+│ (.promptherder/agent/)
 └──────────────┘
 ```
 
-1. `promptherder pull <url>` downloads a herd into `.promptherder/herds/`
-2. `promptherder` merges all herds into `.promptherder/agent/`, then fans out to each target
-3. `.promptherder/manifest.json` tracks what files promptherder owns
+- **Herds** provide shared skills/rules across repos (pulled from GitHub)
+- **Repo-local** files in `.promptherder/agent/` add per-project skills, rules, or overrides
+- **`hard-rules.md`** in `.promptherder/` contains always-on rules specific to this repo
+- `promptherder` merges everything and fans out to each agent target
+- `.promptherder/manifest.json` tracks what files promptherder owns
 
 ## Commands
 

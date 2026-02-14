@@ -1,6 +1,6 @@
 ---
-name: postmark-email
-description: Syntax cheatsheet for Postmark Email API. Covers sending transactional emails with attachments.
+name: postmark-api
+description: Postmark API syntax — sending transactional emails, batch emails, and attachments. Use when integrating Postmark or sending email from application code.
 ---
 
 # Postmark Email — Syntax Cheatsheet

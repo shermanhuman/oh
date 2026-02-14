@@ -1,6 +1,6 @@
 ---
-name: groq-whisper
-description: Syntax cheatsheet for Groq's OpenAI-compatible Whisper transcription API. Covers audio transcription with prompt-based jargon guidance.
+name: groq-api
+description: Groq API syntax — Whisper transcription, audio processing, and prompt-based jargon guidance. Use when calling Groq endpoints or transcribing audio.
 ---
 
 # Groq Whisper — Syntax Cheatsheet
