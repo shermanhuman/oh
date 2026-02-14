@@ -23,12 +23,14 @@ Environment-level rules and skills that apply across all your projects — thing
 
 ### Skills
 
-| Skill                 | Description                                                              |
-| --------------------- | ------------------------------------------------------------------------ |
-| `waxseal`             | SealedSecrets management with GSM as source of truth                     |
-| `groq-whisper`        | Groq's Whisper transcription API — models, prompt engineering for jargon |
-| `postmark-email`      | Postmark transactional email API — sending, attachments, batch           |
-| `telnyx-call-control` | Telnyx Voice API v2 — call handling, recording, webhook events           |
+| Skill                 | Description                                                                |
+| --------------------- | -------------------------------------------------------------------------- |
+| `phoenix-contexts`    | Phoenix context boundary pattern — keeps Repo/Ecto.Query out of LiveViews  |
+| `promptherder`        | CLI reference for managing agent rules, skills, and workflows across tools |
+| `waxseal`             | SealedSecrets management with GSM as source of truth                       |
+| `groq-whisper`        | Groq's Whisper transcription API — models, prompt engineering for jargon   |
+| `postmark-email`      | Postmark transactional email API — sending, attachments, batch             |
+| `telnyx-call-control` | Telnyx Voice API v2 — call handling, recording, webhook events             |
 
 ### Rules
 
@@ -42,7 +44,11 @@ oh/
 ├── skills/
 │   ├── groq-whisper/
 │   │   └── SKILL.md
+│   ├── phoenix-contexts/
+│   │   └── SKILL.md
 │   ├── postmark-email/
+│   │   └── SKILL.md
+│   ├── promptherder/
 │   │   └── SKILL.md
 │   ├── telnyx-call-control/
 │   │   └── SKILL.md
