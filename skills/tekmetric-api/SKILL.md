@@ -175,6 +175,30 @@ wait = min(2^n + random_ms, 60_000)  # n starts at 1
 
 ---
 
+## Development Rules
+
+### 🔴 ALWAYS curl-test before committing code
+
+**Before writing or modifying any code that interacts with the Tekmetric API, verify the actual API behavior with a direct curl call first.** Do not trust the official documentation alone — it is incomplete and sometimes inaccurate.
+
+This rule applies when:
+
+- **Integrating a new endpoint** — curl it, inspect the full response shape, note which fields are present/absent
+- **Using a new query parameter** — curl with and without it to confirm the actual filtering behavior
+- **Combining parameters** — the API has known cases where parameter combinations produce surprising results (e.g., mixing `updatedDateStart` with `deletedDateStart`)
+- **Debugging unexpected sync behavior** — curl the raw API to isolate whether the issue is API-side or code-side
+
+This rule does NOT apply to:
+
+- Refactoring code that handles a response shape you've already verified
+- Changes to local-only logic (database upserts, worker scheduling, etc.)
+
+**Why this matters:** This API has undocumented behaviors that have caused production bugs. The employees endpoint silently omits `shopId`, error responses come in 3 different formats, and page sizes are silently capped. Every one of these was discovered through direct curl testing, not from reading docs.
+
+See the [Local Development & Testing](#local-development--testing) section for ready-to-use curl and PowerShell examples.
+
+---
+
 ## Learnings (Undocumented Behaviors)
 
 These are field-hardened findings from production integration work. They are **not** in the official Tekmetric documentation.
