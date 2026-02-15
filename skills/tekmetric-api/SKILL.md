@@ -46,6 +46,15 @@ curl -X POST 'https://sandbox.tekmetric.com/api/v1/oauth/token' \
 - Use the token as: `-H "Authorization: Bearer <access_token>"`
 - Token is long-lived — cache it and reuse until revoked
 
+### Token Lifecycle (Verified 2026-02-15)
+
+- The token endpoint is **idempotent** — calling it repeatedly returns the **same token UUID**, not a new one
+- Tokens **do not expire** unless explicitly revoked by Tekmetric
+- There is **no self-service token rotation** — you cannot programmatically revoke and reissue
+- The `expires_in` field may or may not be present in the response; if absent, treat as non-expiring
+
+**Security implications:** Since the token is permanent and non-rotatable, treat the Client ID + Client Secret as the primary secrets to protect. Store them in sealed secrets (never in code or env files). The access token should be cached in memory only (never persisted to disk or logged). If a token is ever compromised, contact Tekmetric to revoke and reissue.
+
 ---
 
 ## Pagination
