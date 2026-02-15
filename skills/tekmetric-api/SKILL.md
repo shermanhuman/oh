@@ -5,7 +5,7 @@ description: Tekmetric REST API — authentication, paginated endpoints, sync pa
 
 # Tekmetric API — Skill Reference
 
-> **Full endpoint documentation**: `@meta-honman/docs/Tekmetric-API.txt`
+> **Full endpoint documentation**: See `Tekmetric-API.txt` in this skill directory.
 > This skill focuses on patterns, gotchas, and integration knowledge that go beyond the raw docs.
 
 ---
@@ -130,6 +130,32 @@ Use `DateTime.to_iso8601/1` in Elixir — the default output with `Z` suffix is 
 | 404       | Not found          | —                              |
 | 429       | Rate limited       | Backoff and retry              |
 | 5xx       | Server error       | Retry with exponential backoff |
+
+### Error Response Formats (3 different shapes!)
+
+The API uses **three different** error response formats depending on the endpoint and error type:
+
+**1. OAuth token errors** (POST `/oauth/token`):
+
+```json
+{"error": "invalid_client"}
+// or
+{"error": "unsupported_grant_type", "error_description": "OAuth 2.0 Parameter: grant_type"}
+```
+
+**2. Bearer token 401** (invalid/expired token on API endpoints):
+
+```
+HTTP 401 — empty body (no JSON)
+```
+
+**3. API-level errors** (403 forbidden, etc.):
+
+```json
+{ "type": "ERROR", "message": "Access Denied", "data": null, "details": {} }
+```
+
+⚠️ Always check the HTTP status code first — don't assume a JSON body exists.
 
 ### Exponential Backoff for 429s
 
@@ -292,3 +318,98 @@ end
 | Employees     | `updatedDateStart/End`                         | Full re-fetch (no delete filter) | No     |
 | Appointments  | `updatedDateStart/End` + `includeDeleted=true` | Same call                        | No     |
 | Shops         | Full list (small dataset)                      | N/A                              | No     |
+
+---
+
+## Local Development & Testing
+
+### Retrieving Sandbox Credentials
+
+Sandbox credentials are stored as Kubernetes secrets in the `breakdown-admin-secrets` secret (namespace: `default`).
+
+**Git Bash:**
+
+```bash
+# Extract credentials
+TK_ID=$(kubectl get secret breakdown-admin-secrets -n default \
+  -o jsonpath='{.data.tekmetric_sandbox_client_id}' | base64 -d)
+TK_SECRET=$(kubectl get secret breakdown-admin-secrets -n default \
+  -o jsonpath='{.data.tekmetric_sandbox_client_secret}' | base64 -d)
+
+# Set for local use (optional — add to shell profile for persistence)
+export TEKMETRIC_SANDBOX_CLIENT_ID="$TK_ID"
+export TEKMETRIC_SANDBOX_CLIENT_SECRET="$TK_SECRET"
+```
+
+**PowerShell:**
+
+```powershell
+# Extract credentials
+$TK_ID = kubectl get secret breakdown-admin-secrets -n default `
+  -o jsonpath='{.data.tekmetric_sandbox_client_id}' | ForEach-Object {
+    [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($_))
+  }
+$TK_SECRET = kubectl get secret breakdown-admin-secrets -n default `
+  -o jsonpath='{.data.tekmetric_sandbox_client_secret}' | ForEach-Object {
+    [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($_))
+  }
+
+# Set for local use
+$env:TEKMETRIC_SANDBOX_CLIENT_ID = $TK_ID
+$env:TEKMETRIC_SANDBOX_CLIENT_SECRET = $TK_SECRET
+```
+
+### Testing API Calls
+
+**Git Bash (curl):**
+
+```bash
+# 1. Get a token
+BASIC=$(echo -n "${TK_ID}:${TK_SECRET}" | base64)
+TOKEN=$(curl -s -X POST 'https://sandbox.tekmetric.com/api/v1/oauth/token' \
+  -H "Authorization: Basic ${BASIC}" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+
+# 2. List shops
+curl -s 'https://sandbox.tekmetric.com/api/v1/shops' \
+  -H "Authorization: Bearer $TOKEN"
+
+# 3. Fetch customers (paginated)
+curl -s 'https://sandbox.tekmetric.com/api/v1/customers?shop=2&size=5' \
+  -H "Authorization: Bearer $TOKEN"
+
+# 4. Fetch a single repair order with embedded jobs
+curl -s 'https://sandbox.tekmetric.com/api/v1/repair-orders?shop=2&size=1' \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**PowerShell (Invoke-RestMethod):**
+
+```powershell
+# 1. Get a token
+$basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${TK_ID}:${TK_SECRET}"))
+$tokenResp = Invoke-RestMethod -Method Post `
+  -Uri 'https://sandbox.tekmetric.com/api/v1/oauth/token' `
+  -Headers @{ Authorization = "Basic $basic"; 'Content-Type' = 'application/x-www-form-urlencoded' } `
+  -Body 'grant_type=client_credentials'
+$token = $tokenResp.access_token
+
+# 2. List shops
+Invoke-RestMethod -Uri 'https://sandbox.tekmetric.com/api/v1/shops' `
+  -Headers @{ Authorization = "Bearer $token" }
+
+# 3. Fetch customers (paginated)
+Invoke-RestMethod -Uri 'https://sandbox.tekmetric.com/api/v1/customers?shop=2&size=5' `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+### Verification Script
+
+A `verify_claims.sh` script is included in this skill directory. It runs 16 automated tests against the sandbox to verify every assertion in this document:
+
+```bash
+bash skills/tekmetric-api/verify_claims.sh
+```
+
+Last verified: **2026-02-15** — 23 passed, 0 failed, 1 warning (rate limit not tested).
