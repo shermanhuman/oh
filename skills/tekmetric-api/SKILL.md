@@ -428,12 +428,4 @@ Invoke-RestMethod -Uri 'https://sandbox.tekmetric.com/api/v1/customers?shop=2&si
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
-### Verification Script
-
-A `verify_claims.sh` script is included in this skill directory. It runs 16 automated tests against the sandbox to verify every assertion in this document:
-
-```bash
-bash skills/tekmetric-api/verify_claims.sh
-```
-
-Last verified: **2026-02-15** — 23 passed, 0 failed, 1 warning (rate limit not tested).
+All assertions in this document were verified against the live sandbox API on **2026-02-15** — 23 passed, 0 failed, 1 warning (rate limit not tested).
