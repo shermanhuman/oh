@@ -25,10 +25,13 @@ Environment-level rules and skills that apply across all your projects — thing
 
 | Skill                 | Description                                                              |
 | --------------------- | ------------------------------------------------------------------------ |
+| `daisyui`             | DaisyUI v5 component library — semantic classes, themes, drawer gotchas  |
 | `groq-api`            | Groq API syntax — Whisper transcription, audio processing                |
 | `phoenix`             | Core Phoenix patterns — context boundaries, LiveView, Ecto, architecture |
 | `postmark-api`        | Postmark API syntax — transactional emails, batch, attachments           |
 | `promptherder`        | CLI reference for syncing agent rules, skills, and workflows             |
+| `release`             | Semver release workflow — bump, tag, push, verify CI (Go + Elixir)       |
+| `tekmetric-api`       | Tekmetric REST API — auth, pagination, sync patterns, undocumented behaviors |
 | `telnyx-call-control` | Telnyx Voice API v2 — call handling, recording, webhook events           |
 | `waxseal`             | SealedSecrets management with GSM as source of truth                     |
 
@@ -42,6 +45,8 @@ _None yet — add project-environment rules as needed._
 oh/
 ├── herd.json
 ├── skills/
+│   ├── daisyui/
+│   │   └── SKILL.md
 │   ├── groq-api/
 │   │   └── SKILL.md
 │   ├── phoenix/
@@ -49,6 +54,10 @@ oh/
 │   ├── postmark-api/
 │   │   └── SKILL.md
 │   ├── promptherder/
+│   │   └── SKILL.md
+│   ├── release/
+│   │   └── SKILL.md
+│   ├── tekmetric-api/
 │   │   └── SKILL.md
 │   ├── telnyx-call-control/
 │   │   └── SKILL.md
