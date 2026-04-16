@@ -1,6 +1,8 @@
 # Oh
 
-A [promptherder](https://github.com/shermanhuman/promptherder) herd for cross-project environment rules and skills.
+A [promptherder](https://github.com/shermanhuman/promptherder) herd — my personal collection of skills covering the tools, APIs, and patterns I use across projects.
+
+**This is not a general-purpose library.** The skills here are specific to my stack (Phoenix, Telnyx, Tekmetric, etc.) and probably aren't useful to you directly. What _is_ useful is seeing how a herd is structured — if you want to build your own collection of reusable AI agent skills, this is a working example of how to do it with promptherder.
 
 Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the greatest home run hitter in professional baseball history. 868 career home runs across 22 seasons with the Yomiuri Giants. If compound-v gives your AI agent superpowers, oh is the discipline and consistency that turns raw power into a record-breaking career. 王貞治.
 
@@ -19,7 +21,7 @@ promptherder
 
 ## What's Included
 
-Environment-level rules and skills that apply across all your projects — things that are bigger than any single repo but smaller than a full methodology.
+Skills covering the tools, APIs, and infrastructure patterns used across my projects.
 
 ### Skills
 
