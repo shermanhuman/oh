@@ -1,0 +1,62 @@
+name: Version Bump Check
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  check-version:
+    name: Version Bump Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version was bumped
+        run: |
+          set -euo pipefail
+
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          git fetch origin "$BASE_REF"
+
+          PR_VERSION=$(grep -oP '"version":\s*"\K[^"]+' herd.json || true)
+          MAIN_VERSION=$(git show "origin/$BASE_REF:herd.json" 2>/dev/null | grep -oP '"version":\s*"\K[^"]+' || true)
+
+          if [ -z "$PR_VERSION" ]; then
+            echo "::error::Could not extract version from herd.json."
+            exit 1
+          fi
+
+          echo "PR version:   $PR_VERSION"
+          echo "Base version: $MAIN_VERSION"
+
+          if [ -z "$MAIN_VERSION" ]; then
+            echo "✓ No version on base branch — first version: $PR_VERSION"
+            exit 0
+          fi
+
+          if [ "$PR_VERSION" = "$MAIN_VERSION" ]; then
+            echo ""
+            echo "::error::Version has not been bumped. Update the version in herd.json before merging."
+            echo "Current version on $BASE_REF: $MAIN_VERSION"
+            echo "Bump minor for features, patch for fixes."
+            exit 1
+          fi
+
+          # Enforce version is greater, not just different (no downgrades).
+          IFS='.' read -r PR_MAJOR PR_MINOR PR_PATCH <<< "$PR_VERSION"
+          IFS='.' read -r MAIN_MAJOR MAIN_MINOR MAIN_PATCH <<< "$MAIN_VERSION"
+
+          if (( PR_MAJOR < MAIN_MAJOR )) || \
+             (( PR_MAJOR == MAIN_MAJOR && PR_MINOR < MAIN_MINOR )) || \
+             (( PR_MAJOR == MAIN_MAJOR && PR_MINOR == MAIN_MINOR && PR_PATCH <= MAIN_PATCH )); then
+            echo ""
+            echo "::error::Version must be greater than base. Got $PR_VERSION, base has $MAIN_VERSION."
+            echo "Bump minor for features, patch for fixes."
+            exit 1
+          fi
+
+          echo "✓ Version bumped: $MAIN_VERSION → $PR_VERSION"
