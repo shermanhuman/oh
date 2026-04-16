@@ -26,6 +26,7 @@ Environment-level rules and skills that apply across all your projects — thing
 | Skill                 | Description                                                              |
 | --------------------- | ------------------------------------------------------------------------ |
 | `daisyui`             | DaisyUI v5 component library — semantic classes, themes, drawer gotchas  |
+| `dockerfile`          | Docker best practices — Alpine pinning, security patches, multi-stage builds |
 | `groq-api`            | Groq API syntax — Whisper transcription, audio processing                |
 | `phoenix`             | Core Phoenix patterns — context boundaries, LiveView, Ecto, architecture |
 | `postmark-api`        | Postmark API syntax — transactional emails, batch, attachments           |
@@ -46,6 +47,8 @@ oh/
 ├── herd.json
 ├── skills/
 │   ├── daisyui/
+│   │   └── SKILL.md
+│   ├── dockerfile/
 │   │   └── SKILL.md
 │   ├── groq-api/
 │   │   └── SKILL.md
