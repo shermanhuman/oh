@@ -14,7 +14,7 @@ Sources                          Agent targets (local)
 ┌──────────────┐
 │ herds (GitHub)│──┐
 └──────────────┘  │
-                  ├──→  .agent/         (Antigravity)
+                  ├──→  .agents/        (Antigravity)
 ┌──────────────┐  ├──→  .github/        (Copilot)
 │ repo-local   │──┘
 │ (.promptherder/agent/)
