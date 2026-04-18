@@ -5,14 +5,15 @@ description: Semver release workflow — bump version, tag, push, verify CI. Use
 
 # Release Skill
 
-Handles semver releases for Go and Phoenix/Elixir projects. Detects the project type automatically and follows the appropriate workflow.
+Handles semver releases for Go, Phoenix/Elixir, and promptherder herd projects. Detects the project type automatically and follows the appropriate workflow.
 
 ## Detect Project Type
 
-| Signal           | Type           |
-| ---------------- | -------------- |
-| `mix.exs` exists | Phoenix/Elixir |
-| `go.mod` exists  | Go             |
+| Signal             | Type              |
+| ------------------ | ----------------- |
+| `herd.json` exists | Promptherder herd |
+| `mix.exs` exists   | Phoenix/Elixir    |
+| `go.mod` exists    | Go                |
 
 If both exist, ask the user which to release.
 
@@ -90,6 +91,25 @@ kubectl create -f apps/<app-name>/migration-job.yaml
 - `-X main.BuildDate={{.Date}}`
 
 No file edits needed — the git tag IS the version.
+
+---
+
+### Promptherder Herd
+
+**Version location:** `herd.json` → `"version": "X.Y.Z"` at the top level.
+
+**When to bump:** Before opening any PR. The `version-check` CI gate enforces monotonic version increases — PRs without a bump will fail.
+
+**Steps:**
+
+1. Read current version from `herd.json`
+2. Compute new version based on bump type (default to `patch` if the change is docs-only or minor)
+3. Update `herd.json` with new version string
+4. Commit: `chore: bump X.Y.Z → X.Y.Z+1`
+
+**No tags needed.** Herds are versioned by `herd.json` only — promptherder reads the version from the file, not from git tags.
+
+**CI gate:** `.github/workflows/version-check.yml` compares the PR's `herd.json` version against the base branch. The version must be strictly greater (semver comparison).
 
 ---
 

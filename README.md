@@ -2,7 +2,8 @@
 
 A [promptherder](https://github.com/shermanhuman/promptherder) herd — my personal collection of skills covering the tools, APIs, and patterns I use across projects.
 
-**This is not a general-purpose library.** The skills here are specific to my stack (Phoenix, Telnyx, Tekmetric, etc.) and probably aren't useful to you directly. What _is_ useful is seeing how a herd is structured — if you want to build your own collection of reusable AI agent skills, this is a working example of how to do it with promptherder.
+> [!NOTE]
+> This is not a general-purpose library. The skills here are specific to my stack (Phoenix, Telnyx, Tekmetric, etc.) and probably aren't useful to you directly. What _is_ useful is seeing how a herd is structured — if you want to build your own collection of reusable AI agent skills, this is a working example of how to do it with promptherder.
 
 Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the greatest home run hitter in professional baseball history. 868 career home runs across 22 seasons with the Yomiuri Giants. If compound-v gives your AI agent superpowers, oh is the discipline and consistency that turns raw power into a record-breaking career. 王貞治.
 
@@ -47,6 +48,7 @@ Skills covering the tools, APIs, and infrastructure patterns used across my proj
 |------|-------------|
 | `mise` | Mise-first policy — always prefer mise for tool installation and execution |
 | `no-merge` | Merging is a human task — agents create PRs, humans merge them |
+| `version-bump` | Bump version before opening PRs — use the `release` skill |
 
 ## Structure
 
@@ -78,7 +80,8 @@ oh/
 │       └── SKILL.md
 └── rules/
     ├── mise.md
-    └── no-merge.md
+    ├── no-merge.md
+    └── version-bump.md
 ```
 
 ## How it fits with Compound V
