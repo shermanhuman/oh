@@ -19,6 +19,8 @@ promptherder pull https://github.com/shermanhuman/oh
 promptherder
 ```
 
+Files install to `.agents/` (Antigravity default since v1.14). Legacy `.agent/` is still read by Antigravity for backward compat — promptherder will prompt you to migrate when you next run it.
+
 ## What's Included
 
 Skills covering the tools, APIs, and infrastructure patterns used across my projects.
@@ -30,6 +32,7 @@ Skills covering the tools, APIs, and infrastructure patterns used across my proj
 | `daisyui`             | DaisyUI v5 component library — semantic classes, themes, drawer gotchas  |
 | `dockerfile`          | Docker best practices — Alpine pinning, security patches, multi-stage builds |
 | `groq-api`            | Groq API syntax — Whisper transcription, audio processing                |
+| `mise`                | Mise dev tool manager — installing, running, and configuring tools       |
 | `phoenix`             | Core Phoenix patterns — context boundaries, LiveView, Ecto, architecture |
 | `postmark-api`        | Postmark API syntax — transactional emails, batch, attachments           |
 | `promptherder`        | CLI reference for syncing agent rules, skills, and workflows             |
@@ -40,7 +43,9 @@ Skills covering the tools, APIs, and infrastructure patterns used across my proj
 
 ### Rules
 
-_None yet — add project-environment rules as needed._
+| Rule | Description |
+|------|-------------|
+| `mise` | Mise-first policy — always prefer mise for tool installation and execution |
 
 ## Structure
 
@@ -53,6 +58,8 @@ oh/
 │   ├── dockerfile/
 │   │   └── SKILL.md
 │   ├── groq-api/
+│   │   └── SKILL.md
+│   ├── mise/
 │   │   └── SKILL.md
 │   ├── phoenix/
 │   │   └── SKILL.md
@@ -68,7 +75,8 @@ oh/
 │   │   └── SKILL.md
 │   └── waxseal/
 │       └── SKILL.md
-└── rules/              # (future: cross-project rules)
+└── rules/
+    └── mise.md
 ```
 
 ## How it fits with Compound V
