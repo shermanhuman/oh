@@ -1,9 +1,6 @@
 ---
 name: mise
-description: >
-  Mise dev tool manager — installing tools, running mise-managed commands,
-  and configuring .mise.toml. Use when installing tools, running CLI commands
-  that aren't found, or setting up project environments.
+description: Mise dev tool manager — installing tools, running mise-managed commands, and configuring .mise.toml. Use when installing tools, running CLI commands that aren't found, or setting up project environments.
 ---
 
 # Mise

@@ -4,7 +4,7 @@ trigger: always_on
 
 # Mise-First Policy
 
-This environment uses [mise](https://mise.jdx.dev) to manage all dev tools and runtimes. Never install tools via `apt`, `brew`, `npm install -g`, or `go install` without checking mise first.
+This environment uses [mise](https://mise.jdx.dev) to manage all dev tools and runtimes. Never install tools via `apt`, `brew`, `npm install -g`, `go install`, or `pip install` without checking mise first.
 
 ## Rules
 
