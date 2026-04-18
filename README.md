@@ -46,6 +46,7 @@ Skills covering the tools, APIs, and infrastructure patterns used across my proj
 | Rule | Description |
 |------|-------------|
 | `mise` | Mise-first policy — always prefer mise for tool installation and execution |
+| `no-merge` | Merging is a human task — agents create PRs, humans merge them |
 
 ## Structure
 
@@ -76,7 +77,8 @@ oh/
 │   └── waxseal/
 │       └── SKILL.md
 └── rules/
-    └── mise.md
+    ├── mise.md
+    └── no-merge.md
 ```
 
 ## How it fits with Compound V
