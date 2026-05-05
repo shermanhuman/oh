@@ -12,4 +12,5 @@ This environment uses [mise](https://mise.jdx.dev) to manage CLI tools and runti
 - **Check before installing:** Run `mise which <tool>` or `mise ls` to see if a tool is already available.
 - **Install via mise:** Use `mise use <tool>@<version>` to add tools. Use `mise use --global` for user-wide tools.
 - **Run mise-managed tools:** If mise is not activated in the shell (common in non-interactive/agent contexts), use `mise exec -- <command>` to run tools. Example: `mise exec -- gh pr create`.
+- **GitHub operations use `gh` via mise:** For creating PRs, viewing PRs, and other GitHub operations, always use `mise exec -- gh <command>`. Never use a browser agent for operations that `gh` can perform.
 - **Never bypass mise:** Do not `apt install`, `brew install`, `npm install -g`, `go install`, or `pip install` tools that mise manages. This avoids version conflicts and ensures reproducibility.
