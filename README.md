@@ -49,8 +49,8 @@ Skills covering the tools, APIs, and infrastructure patterns used across my proj
 
 | Rule | Description |
 |------|-------------|
-| `mise` | Mise-first policy — respect configured mise pins and existing tool access |
-| `pull-requests` | Merging is a human task — prepare feature PRs; merging remains separate by default |
+| `mise` | Mise-first policy — mise first for tools; GitHub always through `mise exec -- gh` |
+| `pull-requests` | Merging is a human task — agents create feature PRs; humans merge |
 | `version-bump` | Bump version before opening PRs — use the `release` skill |
 
 ## Structure
@@ -111,4 +111,6 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## 1.0.0 alignment
 
-Version preparation no longer implies publishing. PR rules reference one version policy, and tool selection follows actual host availability. Larger API/component guides now load from `references/`; the Tekmetric endpoint catalog is preserved. Static examples were corrected for HTTP failures, webhook envelopes, cache invalidation, and tuple-return handling. Dated sandbox observations are not current live-test claims.
+Version preparation no longer implies publishing. PR rules reference one version policy, and mise-first tooling and mandatory pre-PR version bumps remain repository policy. Larger API/component guides now load from `references/`; the Tekmetric endpoint catalog is preserved. Static examples were corrected for HTTP failures, webhook envelopes, cache invalidation, and tuple-return handling. Dated sandbox observations are not current live-test claims.
+
+These are opinionated repository instructions: prefer mise before competing tool managers, use `mise exec -- gh` for GitHub, bump the version before a PR, and leave merging to humans. Native-host portability changes the integration mechanism, not those preferences.

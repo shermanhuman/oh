@@ -1,10 +1,18 @@
 ---
 activation: always
 ---
-# Pull requests
 
-When a PR is requested, prepare the scoped changes and run the required checks. Apply the version policy in `version-bump.md`; that rule is the single source of version-bump guidance. Check the actual default branch and push the feature branch before creating the PR with an available GitHub tool or `gh` (through mise when managed). Use a body file or structured argument for multiline descriptions.
+# Pull Request Rules
 
-Describe the final problem, resulting behavior, migration requirements, and checks actually run. Keep PR text in normal professional prose even when Grugg is active. Update an existing PR when continuing the same branch instead of creating duplicates.
+Follow this order:
 
-By default, leave merging to the user and do not push directly to the default branch. A specific user instruction can change that preference; a generic implementation, YOLO, version-bump, or PR request cannot.
+1. **Bump the version** using the `release` skill and `version-bump.md`. An adequate bump already in this PR satisfies the rule.
+2. **Open with mise-managed gh.** Resolve the actual default branch, push the feature branch, and write the exact description to a body file:
+
+```bash
+mise exec -- gh pr create --title "type: short description" --body-file /tmp/pr-body.md --base <default-branch> --head <branch>
+```
+
+Describe the final change, migration, and checks actually run. Update the existing PR when continuing the same work.
+
+**Merging is a human task. Never merge, squash-merge, or push directly to the default branch. No exceptions.** Creating branches, pushing feature branches, and creating PRs are allowed. When ready, ask the user to merge.

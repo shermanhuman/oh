@@ -1,12 +1,111 @@
 ---
 name: mise
-description: Discover and run mise-managed tools or configure a requested project toolchain.
+description: Mise dev tool manager — installing tools, running mise-managed commands, and configuring .mise.toml. Use when installing tools, running CLI commands that aren't found, or setting up project environments.
 ---
 
 # Mise
 
-Inspect the project's `mise.toml`, `.mise.toml`, lock/config files, and existing commands. If mise manages the tool and shell activation is absent, run `mise exec -- <command>`. `mise which <tool>` and `mise ls --current` help identify active tools. If mise itself is unavailable, use the project's documented equivalent or report the missing prerequisite; do not loop on a missing command.
+[mise](https://mise.jdx.dev) manages all dev tools and runtimes. It replaces nvm, pyenv, goenv, and manual binary installs.
 
-Choose a version consistent with project pins and the requested task. `mise use <tool>@<version>` changes project configuration; use it when that change is intended. `mise install` installs configured tools. `mise use --global` alters user-wide configuration and is not a default recovery step for a missing local command. Project dependencies still use their normal package manager.
+## Key problem: shell activation
 
-For an operation, use an available connected tool or CLI according to coverage, authorization, and user/host preferences. MCP is not universally cheaper and GitHub operations do not always require shelling out. When the chosen CLI is mise-managed, run it through mise. Consult [official mise documentation](https://mise.jdx.dev/) for version-sensitive syntax.
+In non-interactive shells (CI, agent contexts, subprocesses), mise shims may not be on `$PATH`. If a command fails with "not found" and the tool is mise-managed, use:
+
+```bash
+mise exec -- <command> [args...]
+```
+
+This is the single most common agent mistake. Always try `mise exec --` before concluding a tool is missing.
+
+## Common commands
+
+### Discovery
+
+```bash
+mise which gh              # Check if gh is managed by mise
+mise ls                    # List all installed tools + versions
+mise ls --current          # Show tools active in current directory
+```
+
+### Installing tools
+
+```bash
+mise use go@1.24           # Add to local .mise.toml (project-scoped)
+mise use --global gh@latest # Add globally (~/.config/mise/config.toml)
+mise install               # Install all tools from .mise.toml
+```
+
+### Running tools
+
+```bash
+mise exec -- gh pr create          # Run gh via mise
+mise exec -- kubectl get pods      # Run kubectl via mise
+mise exec node@22 -- node -v       # Run with a specific version override
+```
+
+### Tasks (project scripts)
+
+```bash
+mise run test              # Run a task defined in .mise.toml
+mise run build             # Tasks replace Makefiles / npm scripts
+```
+
+## Configuration: .mise.toml
+
+```toml
+[tools]
+node = "22"
+go = "1.24"
+python = "3.12"
+
+[env]
+DATABASE_URL = "postgres://localhost/myapp_dev"
+
+[tasks.test]
+run = "go test ./..."
+
+[tasks.dev]
+run = "npm run dev"
+```
+
+- **Project-scoped:** `.mise.toml` in repo root — committed to git
+- **Local overrides:** `.mise.local.toml` — gitignored, for machine-specific settings
+- **Global:** `~/.config/mise/config.toml` — user-wide defaults
+
+## Decision tree: "I need to interact with X"
+
+1. **Is there an MCP server for it?** Check connected MCP servers (e.g., `kubernetes-mcp-server` for k8s, `argocd-mcp` for Argo CD, `postgres-mcp` for databases)
+2. **Yes →** Use MCP tools for supported non-GitHub operations. For GitHub, use `mise exec -- gh`; this explicit repository preference takes precedence.
+3. **No →** Run `mise which <tool>` — is the CLI mise-managed?
+4. **Yes →** Run with `mise exec -- <tool> [args]`
+5. **Not installed →** Inspect project pins, then `mise install` for configured tools or `mise use <tool>@<version>` for a needed project tool. Use `--global` for an intended user-wide installation, not a default fix for a missing local command.
+6. **Not provided by mise →** Only then use the documented fallback or an existing installation. Explain the exception; do not switch managers merely because mise needs shell activation.
+
+## MCP servers managed by mise
+
+These MCP servers are typically installed via mise and should be preferred over their CLI equivalents:
+
+| MCP Server | Replaces CLI | Purpose |
+|------------|-------------|---------|
+| `kubernetes-mcp-server` | `kubectl` | Kubernetes resource management |
+| `argocd-mcp` | `argocd` | Argo CD application management |
+| `postgres-mcp` | `psql` | PostgreSQL queries and management |
+| `@playwright/mcp` | `playwright` | Browser automation and testing |
+
+## Common tools managed by mise
+
+These tools are typically mise-managed in this environment. Always check before installing separately:
+
+| Tool | Mise key | Purpose |
+|------|----------|---------|
+| `gh` | `gh` | GitHub CLI |
+| `kubectl` | `kubectl` | Kubernetes CLI |
+| `kubeseal` | `kubeseal` | SealedSecrets CLI |
+| `gcloud` | `gcloud` | Google Cloud SDK |
+| `node` | `node` | Node.js runtime |
+| `go` | `go` | Go runtime |
+| `python` | `python` | Python runtime |
+| `argocd` | `argocd` | Argo CD CLI |
+| `semgrep` | `semgrep` | Static analysis |
+
+Example versions illustrate syntax; use the target project’s pinned versions. This skill specifies tool choice, not permission to mutate an unrelated account or install unrequested global tools.

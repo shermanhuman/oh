@@ -317,3 +317,10 @@ This is a caller pattern, not a standalone client. Bind provider, tenant, and sh
 Use the target application's configured sandbox secret source and explicitly identified shop. Do not assume a particular Kubernetes secret, namespace, tenant, or cloud project exists in every repository. Never persist credentials in a shell profile or print raw customer data for a routine test. Parse token responses with a JSON parser and check HTTP failures before consuming fields.
 
 The original authors recorded sandbox observations on February 15, 2026; this review did not rerun those live requests. Treat undocumented behavior, latency, and quotas as dated observations to verify for the target account. Consult the bundled endpoint reference and current provider documentation before changing integrations.
+
+
+### Known Breakdown sandbox setup
+
+For the Breakdown project, the original integration stores sandbox credentials in Kubernetes Secret `breakdown-admin-secrets`, namespace `default`, under `tekmetric_sandbox_client_id` and `tekmetric_sandbox_client_secret`. Use this concrete mapping when working on that project and environment; it is not a default for other repositories.
+
+Read the two fields through the configured Kubernetes MCP when available, otherwise use `mise exec -- kubectl get secret breakdown-admin-secrets -n default` with a field-specific JSONPath and decode that field in memory. Keep the credentials in the request process, not shell profiles, output, or tracked files. Authenticate against `https://sandbox.tekmetric.com/api/v1/oauth/token` using client credentials and a JSON parser for the response. Inspect HTTP status before using the token. Use an explicitly chosen sandbox shop for endpoint verification; retain sanitized fixtures for subsequent offline tests.
