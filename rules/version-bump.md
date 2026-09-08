@@ -1,7 +1,8 @@
 ---
-trigger: always_on
+activation: always
 ---
+# Version changes
 
-# Version Bump Rule
+Before a PR, inspect this repository's version source and CI/release policy. If a bump is required or requested, use `release` when installed, or the repository’s documented process, to update it once for the PR. Do not bump again merely because more fixes were added to that PR. Compare with the PR base; preserve an already adequate increase.
 
-- **Bump version before opening a PR.** If the repo contains `herd.json`, `mix.exs`, or `go.mod`, use the `release` skill to bump the version before creating a pull request. Default to `patch` for minor changes. The CI version-check gate will reject PRs without a version bump.
+Use the user's explicit major/minor/patch choice. Otherwise choose according to the actual compatibility change and project policy. `go.mod` declares a module and Go version, not necessarily the application version; inspect `VERSION`, build flags, tags, and release automation. A version bump does not authorize tagging, pushing, merging, publishing, or deployment.

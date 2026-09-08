@@ -13,6 +13,9 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 # Install promptherder
 go install github.com/shermanhuman/promptherder/cmd/promptherder@latest
 
+# Select targets explicitly (Promptherder 1.x)
+promptherder install codex claude
+
 # Pull this herd
 promptherder pull https://github.com/shermanhuman/oh
 
@@ -20,7 +23,7 @@ promptherder pull https://github.com/shermanhuman/oh
 promptherder
 ```
 
-Files install to `.agents/` (Antigravity default since v1.14). Legacy `.agent/` is still read by Antigravity for backward compat — promptherder will prompt you to migrate when you next run it.
+Promptherder 1.x compiles native host rules and skill bundles. Codex uses `.agents/skills/`; Claude uses `.claude/skills/`. No host is enabled by default. Use the 1.0.0 feature build until it is published; existing locks need review with `plan --update-lock` before applying the update.
 
 ## What's Included
 
@@ -37,7 +40,7 @@ Skills covering the tools, APIs, and infrastructure patterns used across my proj
 | `phoenix`             | Core Phoenix patterns — context boundaries, LiveView, Ecto, architecture |
 | `postmark-api`        | Postmark API syntax — transactional emails, batch, attachments           |
 | `promptherder`        | CLI reference for syncing agent rules, skills, and workflows             |
-| `release`             | Semver release workflow — bump, tag, push, verify CI (Go + Elixir)       |
+| `release`             | Version preparation separated from explicitly requested publishing       |
 | `tekmetric-api`       | Tekmetric REST API — auth, pagination, sync patterns, undocumented behaviors |
 | `telnyx-call-control` | Telnyx Voice API v2 — call handling, recording, webhook events           |
 | `waxseal`             | SealedSecrets management with GSM as source of truth                     |
@@ -46,8 +49,8 @@ Skills covering the tools, APIs, and infrastructure patterns used across my proj
 
 | Rule | Description |
 |------|-------------|
-| `mise` | Mise-first policy — always prefer mise for tool installation and execution |
-| `no-merge` | Merging is a human task — agents create PRs, humans merge them |
+| `mise` | Mise-first policy — respect configured mise pins and existing tool access |
+| `pull-requests` | Merging is a human task — prepare feature PRs; merging remains separate by default |
 | `version-bump` | Bump version before opening PRs — use the `release` skill |
 
 ## Structure
@@ -80,7 +83,7 @@ oh/
 │       └── SKILL.md
 └── rules/
     ├── mise.md
-    ├── no-merge.md
+    ├── pull-requests.md
     └── version-bump.md
 ```
 
@@ -105,3 +108,7 @@ promptherder
 ## License
 
 MIT License — Copyright (c) 2026 Sherman Boyd
+
+## 1.0.0 alignment
+
+Version preparation no longer implies publishing. PR rules reference one version policy, and tool selection follows actual host availability. Larger API/component guides now load from `references/`; the Tekmetric endpoint catalog is preserved. Static examples were corrected for HTTP failures, webhook envelopes, cache invalidation, and tuple-return handling. Dated sandbox observations are not current live-test claims.

@@ -1,25 +1,10 @@
 ---
-trigger: always_on
+activation: always
 ---
+# Pull requests
 
-# Pull Request Rules
+When a PR is requested, prepare the scoped changes and run the required checks. Apply the version policy in `version-bump.md`; that rule is the single source of version-bump guidance. Check the actual default branch and push the feature branch before creating the PR with an available GitHub tool or `gh` (through mise when managed). Use a body file or structured argument for multiline descriptions.
 
-## How to open a PR
+Describe the final problem, resulting behavior, migration requirements, and checks actually run. Keep PR text in normal professional prose even when Grugg is active. Update an existing PR when continuing the same branch instead of creating duplicates.
 
-Follow these steps in order:
-
-1. **Bump the version** — If the repo contains `herd.json`, `mix.exs`, or `go.mod`, use the `release` skill to bump the version before creating the PR. Default to `patch` for minor changes. The CI version-check gate will reject PRs without a version bump.
-
-2. **Open the PR with `gh`** — Always use `mise exec -- gh pr create`. Never use a browser agent for GitHub operations that `gh` can handle.
-
-```bash
-mise exec -- gh pr create \
-  --title "type: short description" \
-  --body "..." \
-  --base <default-branch> \
-  --head <branch>
-```
-
-## Merging is a human task
-
-**Never merge a branch, squash-merge a PR, or push directly to the default branch.** You may create branches, push to feature branches, and create PRs. When work is ready to merge, ask the user to merge. This rule has no exceptions.
+By default, leave merging to the user and do not push directly to the default branch. A specific user instruction can change that preference; a generic implementation, YOLO, version-bump, or PR request cannot.

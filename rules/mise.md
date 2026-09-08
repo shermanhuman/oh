@@ -1,16 +1,8 @@
 ---
-trigger: always_on
+activation: always
 ---
+# Tooling
 
-# Mise-First Policy
+Respect the target project's toolchain pins. When mise is configured or the tool is mise-managed, use its environment (`mise exec -- <command>` if shell activation is unavailable). Check existing tools and project configuration before installing anything. Prefer project-scoped pinned tools; a project task does not imply permission to alter global tools or upgrade runtime versions.
 
-This environment uses [mise](https://mise.jdx.dev) to manage CLI tools and runtimes. Never install **tools** via `apt`, `brew`, `npm install -g`, `go install`, or `pip install` without checking mise first. This does not apply to per-project dependencies (e.g., `pip install` into a venv or `npm install` for project packages).
-
-## Rules
-
-- **MCP first, CLI second:** If an MCP server exists for a tool (e.g., `kubernetes-mcp-server` for kubectl, `argocd-mcp` for argocd, `postgres-mcp` for psql), use the MCP tools instead of shelling out. Fall back to `mise exec -- <command>` only when MCP doesn't cover the operation.
-- **Check before installing:** Run `mise which <tool>` or `mise ls` to see if a tool is already available.
-- **Install via mise:** Use `mise use <tool>@<version>` to add tools. Use `mise use --global` for user-wide tools.
-- **Run mise-managed tools:** If mise is not activated in the shell (common in non-interactive/agent contexts), use `mise exec -- <command>` to run tools. Example: `mise exec -- gh pr create`.
-- **GitHub operations use `gh` via mise:** For creating PRs, viewing PRs, and other GitHub operations, always use `mise exec -- gh <command>`. Never use a browser agent for operations that `gh` can perform.
-- **Never bypass mise:** Do not `apt install`, `brew install`, `npm install -g`, `go install`, or `pip install` tools that mise manages. This avoids version conflicts and ensures reproducibility.
+Use a connected API/MCP tool when it supports the operation and matches the task's account and permissions. Otherwise use the appropriate CLI; for GitHub prefer `gh` over browser automation when it covers the operation. This preference does not override explicit user or host tool instructions. Neither MCP nor mise grants authorization for the operation itself.
