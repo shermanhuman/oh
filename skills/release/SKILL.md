@@ -1,148 +1,85 @@
 ---
 name: release
-description: Semver release workflow — bump version, tag, push, verify CI. Use when releasing, bumping version, updating version, or when the user says 'release', 'bump', 'major', 'minor', 'patch', 'update version', 'new version', 'cut a release', 'tag', or 'goreleaser'.
+description: Prepare a requested version bump or release using the repository’s actual version source and publishing workflow.
 ---
 
-# Release Skill
+# Version and release preparation
 
-Handles semver releases for Go, Phoenix/Elixir, and promptherder herd projects. Detects the project type automatically and follows the appropriate workflow.
+Identify the repository and requested action first. A **bump** changes version metadata and relevant documentation; it does not publish. A **release** follows the repository's established release mechanism for the requested version. Existing user authorization persists; ask only for a consequential choice or action outside that authorization.
 
-## Detect Project Type
+## Find the source of truth
 
-| Signal             | Type              |
-| ------------------ | ----------------- |
-| `herd.json` exists | Promptherder herd |
-| `mix.exs` exists   | Phoenix/Elixir    |
-| `go.mod` exists    | Go                |
+Inspect `herd.json`, `VERSION`, `mix.exs`, package metadata, build scripts, tags, and `.github/workflows/`. More than one file can describe one product; do not ask which to release solely because multiple signals exist. Ask only when there are genuinely separate products and the target is unclear.
 
-If both exist, ask the user which to release.
+- Herds: update top-level `herd.json.version`; inspect the repository's version-check gate.
+- Elixir: update the actual application version in `mix.exs` or its configured source.
+- Go: `go.mod` is not an application version file. Honor `VERSION` or equivalent when present; otherwise inspect tag/build-flag conventions. A bump-only request in a tag-only project may need a proposed next version rather than creating a publishing tag.
 
-## Pre-release Checklist
+Use the requested semver level. Without one, infer patch for fixes, minor for compatible features, and major for breaking changes, subject to the project's pre-1.0 policy. Compare with the PR base and existing edits to avoid multiple bumps for the same PR. Do not reset a larger intentional bump.
 
-Before bumping, verify:
+## Required command sequence
 
-1. **Working tree is clean** — `git status --porcelain` should be empty. If not, warn the user.
-2. **On the correct branch** — check with `git branch --show-current`. Typically `main`. Warn if on a different branch.
-3. **Tests pass** — run `mix precommit` (Elixir, per project rules) or `go test ./...` (Go).
-4. **Current version** — read and display the current version so the user confirms the bump.
+Use mise for all managed CLI operations, including GitHub. Do not substitute another package manager or a different GitHub integration merely because it is available.
 
-## Version Bump
+1. Inspect `git status --short`, the current feature branch, the PR base, and the current version source. Keep unrelated edits intact.
+2. Compute the requested semver bump: major `X+1.0.0`, minor `X.Y+1.0`, patch `X.Y.Z+1`. For PR preparation, a version already increased appropriately over the base is sufficient.
+3. Edit `herd.json.version`, `mix.exs`'s application version, `VERSION`, or the repository's actual authoritative source; synchronize required copies.
+4. Validate: Go uses `mise exec -- go test ./...`; Elixir uses `mise exec -- mix precommit` when defined, otherwise `mise exec -- mix test` and `mise exec -- mix compile --warnings-as-errors`. For a herd, validate `herd.json`, skill frontmatter, resource links, and `mise exec -- promptherder check` in a fixture with that herd installed. Run configured repository checks too.
+5. For a requested PR, commit the scoped changes, push the feature branch, and run `mise exec -- gh pr create --base <default-branch> --head <feature-branch> --title '<title>' --body-file <body-file>`. Update the existing PR when one already exists. Do not tag as part of this step.
 
-### Determine Bump Type
+If mise cannot supply a particular tool, follow the mise policy's documented fallback; do not silently choose another installer. If a required check is unavailable, report the exact blocker instead of claiming it passed.
 
-If the user said "bump" without specifying, ask:
+## Prepare
 
-> Bump type? `major` (breaking changes), `minor` (new features), `patch` (fixes)
+Inspect the working tree and preserve unrelated edits. A dirty tree is normal during feature preparation, not a reason to discard changes or force a clean-tree approval. Work on the appropriate feature branch; do not switch to main just to bump a version. Edit the authoritative metadata and any required synchronized copies. Run applicable validation and reuse already-valid checks when no affected code changed.
 
-Apply semver rules: given `X.Y.Z`:
+Stop here for a bump-only request and report the old/new version and changed files. If the user requested a PR, continue through the PR workflow without tagging or publishing.
 
-- `major` → `X+1.0.0`
-- `minor` → `X.Y+1.0`
-- `patch` → `X.Y.Z+1`
+## Publish when requested
 
----
+Inspect actual release automation before creating tags: some repositories tag from VERSION after a merge, others publish on a manually pushed tag. Do not add a second trigger or assume `.goreleaser.yml` proves a CI trigger exists. Verify the exact commit, version, required checks, and destination before the authorized publish step. Never include unrelated uncommitted changes in a release commit.
 
-### Phoenix/Elixir
+Track the specific release/tag workflow and commit, not merely the newest CI run. Report the exact artifact/tag and checks. A release does not automatically authorize production rollout, secret rotation, or database migration. Leave those actions to the repository's deployment process and the user's requested scope.
 
-**Version location:** `mix.exs` → `version: "X.Y.Z"` in the `project/0` function.
+## Publication checklist
 
-**Steps:**
+For an explicitly requested tag-driven release, verify the exact reviewed commit and that the tag does not already exist, then create `git tag vX.Y.Z <commit>` and push that exact tag. Do not push main or merge a PR; those are human tasks under this repository policy. If automation creates tags from VERSION, use that workflow instead of creating a duplicate tag.
 
-1. Read current version from `mix.exs`
-2. Compute new version based on bump type
-3. Update `mix.exs` with new version string
-4. Run `mix compile` to verify
-5. Commit: `chore: bump version to vX.Y.Z`
-6. Tag: `git tag vX.Y.Z`
-7. Push: `git push origin $(git branch --show-current) && git push origin vX.Y.Z`
-8. Verify CI: `gh run list --limit 1` — confirm the workflow triggered
+Use `mise exec -- gh run list --commit <sha>` to find the matching run and `mise exec -- gh run view <run-id>` to inspect it. For a GitHub release, verify `mise exec -- gh release view vX.Y.Z`. Report previous/new version, commit/tag, CI result, and artifact URL. Report a failed or pending publication honestly; do not substitute the newest unrelated successful run.
 
-**CI trigger:** The GitHub Actions workflow should trigger on tag pushes (`on: push: tags: ['v*']`). If the current workflow triggers on `push: branches: [main]` instead, **warn the user** that the CI won't trigger on tags and suggest updating the workflow.
+## Project-specific release checks
 
-**Version display:** Phoenix apps using a `Meta` module (pattern: `@version Mix.Project.config()[:version]`) will automatically pick up the new version at compile time. The Docker build bakes it into the release.
+### Phoenix / Elixir
 
-**Migration note:** If the release includes Ecto migrations, remind the user to run the migration job after deployment:
+Read the application version from `project/0` in `mix.exs` or the source it references. Apps using `@version Mix.Project.config()[:version]` bake the version at compile time: rebuild after the bump so the UI/footer is updated. Inspect whether CI deploys on a branch, a tag, or a manual trigger; a branch-triggered deployment is not itself a broken tag workflow.
 
-```
-kubectl create -f apps/<app-name>/migration-job.yaml
-```
-
----
+When the requested release includes Ecto migrations, include the repository's migration job and rollout steps in the handoff. In repositories using `apps/<app-name>/migration-job.yaml`, the migration command is `mise exec -- kubectl create -f apps/<app-name>/migration-job.yaml`; rollout verification is `mise exec -- kubectl rollout status deployment/<app-name> --timeout=120s`. Run these only as part of an authorized deployment, with the actual context, namespace, and manifest checked. Prefer the connected Kubernetes MCP for supported operations under the mise rule.
 
 ### Go
 
-**Version location:** Set via `ldflags` at build time. The version comes from the git tag — no file to edit.
+Check `.goreleaser.yml` or `.goreleaser.yaml`, then the actual workflow. For repositories declaring `main.Version`, `main.Commit`, and `main.BuildDate`, the GoReleaser convention is:
 
-**Steps:**
-
-1. Read current version: `git describe --tags --abbrev=0` (or check GitHub releases)
-2. Compute new version based on bump type
-3. Commit any pending changes first (if needed)
-4. Tag: `git tag vX.Y.Z`
-5. Push: `git push origin $(git branch --show-current) && git push origin vX.Y.Z`
-6. Verify CI: `gh run list --limit 1` — confirm the release workflow triggered
-
-**GoReleaser detection:** Check for `.goreleaser.yml` or `.goreleaser.yaml` in the repo root. If present, the CI uses GoReleaser. If absent, check `.github/workflows/` for the release mechanism — it may use a custom workflow or `go build` directly.
-
-**GoReleaser convention:** Go projects use `.goreleaser.yml` with `ldflags` to inject:
-
-- `-X main.Version={{.Version}}`
-- `-X main.Commit={{.ShortCommit}}`
-- `-X main.BuildDate={{.Date}}`
-
-No file edits needed — the git tag IS the version.
-
----
-
-### Promptherder Herd
-
-**Version location:** `herd.json` → `"version": "X.Y.Z"` at the top level.
-
-**When to bump:** Before opening any PR. The `version-check` CI gate enforces monotonic version increases — PRs without a bump will fail.
-
-**Steps:**
-
-1. Read current version from `herd.json`
-2. Compute new version based on bump type (default to `patch` if the change is docs-only or minor)
-3. Update `herd.json` with new version string
-4. Commit: `chore: bump X.Y.Z → X.Y.Z+1`
-
-**No tags needed.** Herds are versioned by `herd.json` only — promptherder reads the version from the file, not from git tags.
-
-**CI gate:** `.github/workflows/version-check.yml` compares the PR's `herd.json` version against the base branch. The version must be strictly greater (semver comparison).
-
----
-
-## Post-release Verification
-
-After pushing:
-
-1. **Check CI status:** `gh run list --repo <owner/repo> --limit 3 --json status,conclusion,displayTitle`
-2. **Wait for completion** if still running, then report success/failure
-3. **For Phoenix/Elixir:** Remind about pod rollout and migration if applicable:
-   - `kubectl rollout restart deployment/<app-name>` (if using `:latest` tag)
-   - `kubectl create -f apps/<app-name>/migration-job.yaml` (if migrations exist)
-   - `kubectl rollout status deployment/<app-name> --timeout=120s`
-4. **For Go:** Check GitHub Releases page: `gh release view vX.Y.Z --repo <owner/repo>`
-
-## Output Format
-
+```yaml
+ldflags:
+  - -X main.Version={{.Version}}
+  - -X main.Commit={{.ShortCommit}}
+  - -X main.BuildDate={{.Date}}
 ```
-## Release Summary
+
+Use the symbols the application actually declares. If a released binary shows `dev`, inspect the build's `ldflags` and version source. When `VERSION` is tracked, update it; do not assume every Go project versions only through tags.
+
+### Promptherder herds
+
+Bump top-level `herd.json.version` before a PR. The version-check workflow compares it with the PR base and requires a strictly greater semver. Herd consumers read `herd.json`; no tag is needed for a herd version bump. A conventional bump commit is `chore: bump X.Y.Z → X.Y.Z+1`, or include the bump in the scoped feature commit.
+
+## Release summary
+
+Report this table after preparation or publication; use `Not requested` for a tag or publication check that did not run.
 
 | Field | Value |
 |---|---|
-| Project | <name> |
-| Type | Phoenix/Elixir or Go |
-| Previous | vX.Y.Z |
-| New | vX.Y.Z |
-| Tag | vX.Y.Z |
-| CI | ✅ Passed / ⏳ Running / ❌ Failed |
-```
-
-## Common Issues
-
-- **CI doesn't trigger on tags:** Check that the workflow has `on: push: tags: ['v*']`, not just `on: push: branches: [main]`
-- **Elixir version not updated in footer:** The `Meta` module reads `@version` at compile time — the Docker build must happen AFTER the version bump commit
-- **Go version shows "dev":** The `ldflags` aren't being set — check `.goreleaser.yml` or the build command
-- **ArgoCD doesn't pick up new image:** If deployment.yaml uses `:latest`, ArgoCD won't see a change. Either pin to the semver tag or run `kubectl rollout restart`
+| Project / type | name; herd, Elixir, or Go |
+| Previous → new | vX.Y.Z → vX.Y.Z |
+| Commit / tag | exact SHA; tag or Not requested |
+| Validation / CI | passed, failed, pending, or blocked with reason |
+| Artifact | release URL or prepared version-file path |

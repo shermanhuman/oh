@@ -1,25 +1,18 @@
 ---
-trigger: always_on
+activation: always
 ---
 
 # Pull Request Rules
 
-## How to open a PR
+Follow this order:
 
-Follow these steps in order:
-
-1. **Bump the version** — If the repo contains `herd.json`, `mix.exs`, or `go.mod`, use the `release` skill to bump the version before creating the PR. Default to `patch` for minor changes. The CI version-check gate will reject PRs without a version bump.
-
-2. **Open the PR with `gh`** — Always use `mise exec -- gh pr create`. Never use a browser agent for GitHub operations that `gh` can handle.
+1. **Bump the version** using the `release` skill and `version-bump.md`. An adequate bump already in this PR satisfies the rule.
+2. **Open with mise-managed gh.** Resolve the actual default branch, push the feature branch, and write the exact description to a body file:
 
 ```bash
-mise exec -- gh pr create \
-  --title "type: short description" \
-  --body "..." \
-  --base <default-branch> \
-  --head <branch>
+mise exec -- gh pr create --title "type: short description" --body-file /tmp/pr-body.md --base <default-branch> --head <branch>
 ```
 
-## Merging is a human task
+Describe the final change, migration, and checks actually run. Update the existing PR when continuing the same work.
 
-**Never merge a branch, squash-merge a PR, or push directly to the default branch.** You may create branches, push to feature branches, and create PRs. When work is ready to merge, ask the user to merge. This rule has no exceptions.
+**Merging is a human task. Never merge, squash-merge, or push directly to the default branch. No exceptions.** Creating branches, pushing feature branches, and creating PRs are allowed. When ready, ask the user to merge.

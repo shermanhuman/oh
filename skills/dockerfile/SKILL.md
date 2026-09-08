@@ -15,7 +15,7 @@ There are two valid strategies. We use **Option A** because we don't run Renovat
 ARG RUNNER_IMAGE="alpine:3.21"
 ```
 
-Combined with `apk upgrade --no-cache` in the runtime stage, this automatically picks up security patches without manual digest tracking.
+Keep `apk upgrade --no-cache` in the runtime stage. It picks up package updates when that layer executes; a cached layer does not rerun merely because Alpine repositories changed.
 
 ### Option B: Pin exact + automation _(industry standard for larger teams)_
 
@@ -47,7 +47,7 @@ ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-alpine-3
 
 ## Security Patches
 
-Always add `apk upgrade --no-cache` early in the **runtime stage**. This pulls security patches even when Docker Hub hasn't rebuilt the base image tag yet.
+Always add `apk upgrade --no-cache` early in the **runtime stage**. During a patch refresh, force that stage to execute even if the base image tag has not changed.
 
 ```dockerfile
 FROM ${RUNNER_IMAGE}
@@ -69,9 +69,9 @@ Together they cover the gap.
 
 `apk upgrade` means building the same Dockerfile two weeks apart may pull different package versions. We accept this because:
 
-1. Trivy scans in CI catch regressions — a build with a vulnerable package won't pass the security check
-2. Our images are rebuilt on every merge to main, not cached for weeks
-3. The alternative (manual digest tracking) requires automation we don't run
+1. Prefer package freshness over byte-for-byte reproducibility for this repository’s runtime images.
+2. Keep the configured vulnerability scan and rebuild cadence working; inspect the actual CI before claiming a scan ran.
+3. Refresh the package layer deliberately for patch work; normal cached builds alone are not a refresh guarantee.
 
 If you need deterministic builds, pin exact versions with Option B and remove `apk upgrade`.
 
@@ -87,7 +87,6 @@ deps
 node_modules
 .elixir_ls
 .env*
-*.md
 .dockerignore
 Dockerfile
 .github
@@ -106,6 +105,7 @@ FROM ${BUILDER_IMAGE} AS builder
 RUN apk add --no-cache build-base git
 
 WORKDIR /app
+ENV MIX_ENV=prod
 # Copy dependency files first for layer caching
 COPY mix.exs mix.lock ./
 RUN mix deps.get --only prod && mix deps.compile
@@ -142,7 +142,7 @@ CMD ["bin/myapp", "start"]
 
 ## CI / GitHub Actions
 
-Use `docker/build-push-action` with GHA cache. Do **not** use `--no-cache` on the Docker build — it kills layer caching and turns 2-minute builds into 8-minute builds.
+Use `docker/build-push-action` with GHA cache. Preserve layer caching for routine builds. For security-patch refreshes, use `--no-cache-filter <runtime-stage>` on a named runtime stage or a deliberate `--no-cache` rebuild; `--pull` alone does not invalidate a cached package RUN when the base stays unchanged.
 
 ```yaml
 - uses: docker/build-push-action@v5
@@ -158,6 +158,8 @@ Use `docker/build-push-action` with GHA cache. Do **not** use `--no-cache` on th
 | Flag | What it does | Use it? |
 |------|-------------|---------|
 | `pull: true` | Re-checks the base image tag for updates | ✅ Yes — ~5s cost, ensures fresh base |
-| `no-cache: true` | Rebuilds every layer from scratch | ❌ No — kills GHA cache, slow |
+| `no-cache: true` | Rebuilds every layer from scratch | Use deliberately for refreshes; retain caching for routine builds |
 
-The `apk upgrade` in the Dockerfile handles package-level patches. The `pull` flag handles base image freshness. The GHA cache keeps builds fast.
+The `apk upgrade` handles package patches only when executed. `pull` checks base image freshness. Preserve GHA caching for routine builds and explicitly refresh package layers for patch work.
+
+The version strings and action tags above are examples, not recommendations to downgrade the current project. Verify compound image tags exist and preserve compatible builder/runtime libc versions. Keep `.dockerignore` from excluding README/license files needed by builds. [Docker cache invalidation](https://docs.docker.com/build/cache/invalidation/).

@@ -75,11 +75,11 @@ run = "npm run dev"
 ## Decision tree: "I need to interact with X"
 
 1. **Is there an MCP server for it?** Check connected MCP servers (e.g., `kubernetes-mcp-server` for k8s, `argocd-mcp` for Argo CD, `postgres-mcp` for databases)
-2. **Yes →** Use MCP tools. They're cheaper (no shell overhead) and purpose-built.
+2. **Yes →** Use MCP tools for supported non-GitHub operations. For GitHub, use `mise exec -- gh`; this explicit repository preference takes precedence.
 3. **No →** Run `mise which <tool>` — is the CLI mise-managed?
 4. **Yes →** Run with `mise exec -- <tool> [args]`
-5. **Not installed →** `mise use --global <tool>@latest`, then retry
-6. **Not in mise registry →** Only then consider `apt`, `brew`, or direct download
+5. **Not installed →** Inspect project pins, then `mise install` for configured tools or `mise use <tool>@<version>` for a needed project tool. Use `--global` for an intended user-wide installation, not a default fix for a missing local command.
+6. **Not provided by mise →** Only then use the documented fallback or an existing installation. Explain the exception; do not switch managers merely because mise needs shell activation.
 
 ## MCP servers managed by mise
 
@@ -107,3 +107,5 @@ These tools are typically mise-managed in this environment. Always check before 
 | `python` | `python` | Python runtime |
 | `argocd` | `argocd` | Argo CD CLI |
 | `semgrep` | `semgrep` | Static analysis |
+
+Example versions illustrate syntax; use the target project’s pinned versions. This skill specifies tool choice, not permission to mutate an unrelated account or install unrequested global tools.

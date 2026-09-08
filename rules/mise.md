@@ -1,16 +1,13 @@
 ---
-trigger: always_on
+activation: always
 ---
 
 # Mise-First Policy
 
-This environment uses [mise](https://mise.jdx.dev) to manage CLI tools and runtimes. Never install **tools** via `apt`, `brew`, `npm install -g`, `go install`, or `pip install` without checking mise first. This does not apply to per-project dependencies (e.g., `pip install` into a venv or `npm install` for project packages).
+Mise is this repository's preferred CLI tool/runtime manager. Check `mise which <tool>` or `mise ls` before installing tools. Never use `apt`, `brew`, `npm install -g`, `go install`, or `pip install` for tools mise provides. Per-project dependencies (`npm install`, pip into a venv) are exempt.
 
-## Rules
-
-- **MCP first, CLI second:** If an MCP server exists for a tool (e.g., `kubernetes-mcp-server` for kubectl, `argocd-mcp` for argocd, `postgres-mcp` for psql), use the MCP tools instead of shelling out. Fall back to `mise exec -- <command>` only when MCP doesn't cover the operation.
-- **Check before installing:** Run `mise which <tool>` or `mise ls` to see if a tool is already available.
-- **Install via mise:** Use `mise use <tool>@<version>` to add tools. Use `mise use --global` for user-wide tools.
-- **Run mise-managed tools:** If mise is not activated in the shell (common in non-interactive/agent contexts), use `mise exec -- <command>` to run tools. Example: `mise exec -- gh pr create`.
-- **GitHub operations use `gh` via mise:** For creating PRs, viewing PRs, and other GitHub operations, always use `mise exec -- gh <command>`. Never use a browser agent for operations that `gh` can perform.
-- **Never bypass mise:** Do not `apt install`, `brew install`, `npm install -g`, `go install`, or `pip install` tools that mise manages. This avoids version conflicts and ensures reproducibility.
+- **Install through mise:** `mise install` for configured tools; `mise use <tool>@<version>` to add project tools. Use `--global` only for intended user-wide installs. Preserve project pins.
+- **Run through mise:** When shell activation is unavailable, use `mise exec -- <command>`.
+- **GitHub always uses `mise exec -- gh <command>`**, including PR creation and viewing. This takes precedence over MCP preference. Never use a browser for operations `gh` supports.
+- **Other operations: MCP first, CLI second.** Use a connected MCP when it covers the operation (e.g., Kubernetes, Argo CD, PostgreSQL); otherwise use the CLI through mise.
+- **Fallback only if mise cannot provide the tool:** use an existing installation or documented alternative and explain why. Do not introduce a competing manager or upgrade pins merely to run a command.
