@@ -1,10 +1,14 @@
 ---
 name: waxseal
-description: WaxSeal SealedSecrets management — creating, resealing, and rotating Kubernetes secrets with GSM as source of truth. Use in GitOps repositories that actually configure WaxSeal.
+description: WaxSeal 0.5+ SealedSecrets management — adding keys, setting values, rotating, resealing and health checks, with Google Secret Manager as the source of truth. Use in GitOps repositories that have a .waxseal/ directory.
 ---
 
 # waxseal
 
-Read [the focused guide](references/guide.md) when this integration is part of the current task. Use only the sections relevant to the endpoint, component, or operation being changed.
+Read [the focused guide](references/guide.md) when this integration is part of the current task. Use only the sections relevant to the operation being performed.
 
-Confirm the target repository, installed library/CLI version, and configured environment. Examples and dated observations are not proof of current service behavior. Preserve the user's requested scope: writing integration code does not authorize sending real messages, making calls, retrieving unrelated credentials, or changing live resources. Use fixtures or sandbox checks when available and state which behavior was actually verified.
+Confirm the installed version first: `waxseal --version`. This guide describes **0.5.x**, a ground-up rewrite with a new command tree and no aliases for the old names (`addkey`, `updatekey`, `retirekey`, `edit`, `meta`, `advanced` are gone). On-disk formats are unchanged, so an existing repository works with either version, but the commands do not.
+
+Every command can be driven entirely by flags. On a terminal, waxseal prompts for whatever is left out; with `--no-input` (or in CI) it fails instead, naming the missing flag. Secret values are never taken from the command line: use `--from-file PATH`, `--from-file -` for stdin, or `--generate`.
+
+Preserve the user's requested scope: resealing or checking does not authorize rotating or retiring; adding one key does not authorize touching others. `-y` accepts confirmations, it does not grant authorization. Never print, log or echo a secret value, including in error reports.
