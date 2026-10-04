@@ -47,7 +47,7 @@ ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-alpine-3
 
 ## Security Patches
 
-Always add `apk upgrade --no-cache` early in the **runtime stage**. During a patch refresh, force that stage to execute even if the base image tag has not changed.
+With Option A (our default), add `apk upgrade --no-cache` early in the **runtime stage**. During a patch refresh, force that stage to execute even if the base image tag has not changed.
 
 ```dockerfile
 FROM ${RUNNER_IMAGE}
