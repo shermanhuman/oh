@@ -33,8 +33,8 @@ The always-on pull-request rule sets the policy: a PR is a release, one PR per r
 
    Then:
    - **While a round has must-fix findings,** fix them (and that round's polish if it is cheap; leave the rest open for the polish pass), and start a new reviewer for another full round. A reviewer that has already seen the code tends to accept its own earlier conclusions, which is why each round gets a fresh one.
-   - **The first round with no must-fix findings is the last full round.** Fix all polish still open, from this round and earlier ones, in one pass, keeping each fix small (no redesign during the polish pass; a redesign is what makes the next round find new problems). Run the tests, then ask one reviewer for a quick check of only the polish diff, to confirm the fixes broke nothing. Anything new it raises is polish: list it in the PR's review-outcome comment as noted, not fixed. If it raises a must-fix, fix it and run a fresh full round, which counts toward the cap.
-   - **Cap: three full rounds** for the whole PR, counting rounds before and after it opens. If round three still finds must-fix issues, stop and tell the user what keeps recurring. Recurring must-fix findings usually point to a design that should be simplified, not to more review.
+   - **The first round with no must-fix findings is the last full round.** Fix all polish still open, from this round and earlier ones, in one pass, keeping each fix small (no redesign during the polish pass; a redesign is what makes the next round find new problems). Run the tests, then ask one reviewer for a quick check of only the polish diff, to confirm the fixes broke nothing. Anything new it raises is polish: list it as noted, not fixed, in the review-outcome comment (step 3 of "Reviews on the PR"); post the quick check itself as a review comment too. If it raises a must-fix, fix it and run a fresh full round, which counts toward the cap.
+   - **Cap: three full rounds in a row with must-fix findings,** counted across the PR's life (before and after it opens); a round with none resets the count. If the third such round in a row still finds must-fix issues, stop and tell the user what keeps recurring. Rounds that the process requires later (after a CI fix or a merge of the default branch) are always allowed. Recurring must-fix findings usually point to a design that should be simplified, not to more review.
    - Every valid finding from a full round is fixed, or refuted with evidence (cite the code or a test showing it is wrong); only the user may waive a valid one.
    - **Decisions log.** Keep a short list of the decisions the user or you made during the work (in the PR body or a file the reviewer reads). Reviewers don't reopen those decisions; they may flag one only as must-fix, with the harm it causes.
    - **Ask reviewers to be brief:** no speculative findings, no "could be clearer", no repeats of earlier rounds; group polish findings.
@@ -58,7 +58,7 @@ Every review round is recorded on the PR, including the rounds run before it ope
 
 1. Post the **full review** as a PR comment. If you have no GitHub access from this host, put the reviews and the finding-by-finding outcome in your report to the user instead, and say that they are not on the PR yet.
 2. Address every finding from a full round: fix it, or refute it with evidence. Polish raised by the final quick check is listed as noted.
-3. Post a second comment listing each finding and what was done (the fix and its commit SHA, or the evidence).
+3. Post a **review-outcome comment** listing each finding and what was done (the fix and its commit SHA, or the evidence).
 4. After pushing new commits, follow the same loop: must-fix fixes, CI fixes and merges of the default branch get a fresh full round; the final polish pass gets the quick diff-only check. A commit that only changes the version number (the bump, or a re-bump after another PR merged) needs no review round of its own.
 
 ## Merging
