@@ -1,5 +1,13 @@
 # DaisyUI v5 — Component Library for Tailwind CSS
 
+## Contents
+
+- Documentation
+- Installation
+- Core Concepts
+- ⚠️ CRITICAL GOTCHAS
+- Component Quick Reference
+
 DaisyUI is a Tailwind CSS plugin that adds semantic component classes (e.g. `btn`, `card`, `drawer`) so you write less utility soup. **Version 5** targets **Tailwind CSS v4**, uses zero JS, and relies purely on CSS.
 
 ## Documentation

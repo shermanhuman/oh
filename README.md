@@ -10,8 +10,8 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 ## Install
 
 ```bash
-# Install promptherder
-go install github.com/shermanhuman/promptherder/cmd/promptherder@latest
+# Install promptherder (through mise)
+mise use -g github:shermanhuman/promptherder
 
 # Select targets explicitly (Promptherder 1.x)
 promptherder install codex claude
@@ -23,11 +23,11 @@ promptherder pull https://github.com/shermanhuman/oh
 promptherder
 ```
 
-Promptherder 1.x compiles native host rules and skill bundles. Codex uses `.agents/skills/`; Claude uses `.claude/skills/`. No host is enabled by default. Use the 1.0.0 feature build until it is published; existing locks need review with `plan --update-lock` before applying the update.
+Promptherder 1.x compiles native host rules and skill bundles. Codex uses `.agents/skills/`; Claude uses `.claude/skills/`. No host is enabled by default. Review existing locks with `plan --update-lock` before applying an update.
 
 ## What's Included
 
-Skills covering the tools, APIs, and infrastructure patterns used across my projects.
+Skills covering the tools, APIs, and infrastructure patterns used across my projects. API and component skills keep a short `SKILL.md` and load their detail from `references/` only when needed.
 
 ### Skills
 
@@ -37,9 +37,10 @@ Skills covering the tools, APIs, and infrastructure patterns used across my proj
 | `dockerfile`          | Docker best practices — Alpine pinning, security patches, multi-stage builds |
 | `groq-api`            | Groq API syntax — Whisper transcription, audio processing                |
 | `mise`                | Mise dev tool manager — installing, running, and configuring tools       |
-| `phoenix`             | Core Phoenix patterns — context boundaries, LiveView, Ecto, architecture |
+| `phoenix`             | Core Phoenix patterns — context boundaries, LiveView, Ecto, migrations, testing |
 | `postmark-api`        | Postmark API syntax — transactional emails, batch, attachments           |
 | `promptherder`        | CLI reference for syncing agent rules, skills, and workflows             |
+| `pull-requests`       | PR procedure — worktree, local tests and e2e, review rounds, gh pr create, reviews on the PR |
 | `release`             | Version preparation separated from explicitly requested publishing       |
 | `tekmetric-api`       | Tekmetric REST API — auth, pagination, sync patterns, undocumented behaviors |
 | `telnyx-call-control` | Telnyx Voice API v2 — call handling, recording, webhook events           |
@@ -50,8 +51,10 @@ Skills covering the tools, APIs, and infrastructure patterns used across my proj
 | Rule | Description |
 |------|-------------|
 | `mise` | Mise-first policy — mise first for tools; GitHub always through `mise exec -- gh` |
-| `pull-requests` | PRs are releases: work in a worktree, test and review until clean locally, one PR per repository, reviews recorded on the PR; humans merge |
-| `version-bump` | Bump version before opening PRs — use the `release` skill |
+| `pull-requests` | PRs are releases: one PR per repository, worktree until the PR, local tests and e2e, fresh reviewers until no must-fix findings remain (polish fixed in one pass, stop after three rounds in a row with must-fix findings), reviews on the PR; the user merges. The procedure is in the `pull-requests` skill |
+| `version-bump` | Every PR bumps the version, last — use the `release` skill |
+
+Rules are always on (they land in every session's `AGENTS.md`), so they hold only the policy; procedures live in skills that load when needed.
 
 ## Structure
 
@@ -60,27 +63,37 @@ oh/
 ├── herd.json
 ├── skills/
 │   ├── daisyui/
-│   │   └── SKILL.md
+│   │   ├── SKILL.md
+│   │   └── references/guide.md
 │   ├── dockerfile/
 │   │   └── SKILL.md
 │   ├── groq-api/
-│   │   └── SKILL.md
+│   │   ├── SKILL.md
+│   │   └── references/guide.md
 │   ├── mise/
 │   │   └── SKILL.md
 │   ├── phoenix/
-│   │   └── SKILL.md
+│   │   ├── SKILL.md
+│   │   └── references/
 │   ├── postmark-api/
-│   │   └── SKILL.md
+│   │   ├── SKILL.md
+│   │   └── references/guide.md
 │   ├── promptherder/
 │   │   └── SKILL.md
+│   ├── pull-requests/
+│   │   └── SKILL.md
 │   ├── release/
-│   │   └── SKILL.md
+│   │   ├── SKILL.md
+│   │   └── references/phoenix-migrations.md
 │   ├── tekmetric-api/
-│   │   └── SKILL.md
+│   │   ├── SKILL.md
+│   │   └── references/
 │   ├── telnyx-call-control/
-│   │   └── SKILL.md
+│   │   ├── SKILL.md
+│   │   └── references/guide.md
 │   └── waxseal/
-│       └── SKILL.md
+│       ├── SKILL.md
+│       └── references/guide.md
 └── rules/
     ├── mise.md
     ├── pull-requests.md
@@ -109,8 +122,10 @@ promptherder
 
 MIT License — Copyright (c) 2026 Sherman Boyd
 
-## 1.0.0 alignment
+## Changelog
 
-Version preparation no longer implies publishing. PR rules reference one version policy, and mise-first tooling and mandatory pre-PR version bumps remain repository policy. Larger API/component guides now load from `references/`; the Tekmetric endpoint catalog is preserved. Static examples were corrected for HTTP failures, webhook envelopes, cache invalidation, and tuple-return handling. Dated sandbox observations are not current live-test claims.
+- 1.3.0: the always-on PR rule keeps only the policy; the procedure moved to the `pull-requests` skill. Release skill de-duplicated, with its migration runbook in a reference. Phoenix skill grown with LiveView, Ecto, migration and testing references. Reference guides gained a Contents list. Review rounds now loop only on must-fix findings; polish is fixed in one pass with a quick diff check, and three rounds in a row with must-fix findings stop the work for the user.
+- 1.2.0: PRs are releases (worktree, local tests and e2e, review until clean, reviews on the PR); digest-pinned migrations in the release skill.
+- 1.0.0: version preparation separated from publishing; larger guides moved to `references/`.
 
-These are opinionated repository instructions: prefer mise before competing tool managers, use `mise exec -- gh` for GitHub, bump the version before a PR, and leave merging to humans. Native-host portability changes the integration mechanism, not those preferences.
+These are opinionated repository instructions: prefer mise before competing tool managers, use `mise exec -- gh` for GitHub, bump the version in every PR, and leave merging to the user. Native-host portability changes the integration mechanism, not those preferences.

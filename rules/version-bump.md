@@ -2,10 +2,6 @@
 activation: always
 ---
 
-# Version Bump Rule
+# Version bumps
 
-**Bump before opening a PR, regardless of CI gates.** For repositories with `herd.json`, `mix.exs`, or `go.mod`, use the `release` skill and run tool commands through mise. Default to patch for fixes/docs, minor for compatible features, major for breaking changes; honor the user's explicit level.
-
-Compare with the PR base. An adequate existing bump satisfies this PR; do not bump again for each revision. The exception: when the base has reached or passed this PR's version (another PR merged first), re-apply this PR's bump level to the base's version (a minor PR stays a minor bump) before the PR merges. Keep synchronized version files consistent. For Go, inspect `VERSION` and build/release configuration: the `go.mod` Go directive is not the product version. With tag-only versioning, record the intended version in the PR; do not create a publishing tag for a bump-only task.
-
-A bump does not authorize tagging, releasing, merging, or deployment. Use the release skill's publication phase only when requested.
+Every PR in a repository with `herd.json`, `mix.exs` or `go.mod` carries a version bump, even where CI doesn't check for one. Use the `release` skill: bump last, after the work is tested and reviewed, from the PR base's version; patch for fixes and docs, minor for compatible features, major for breaking changes, unless the user names a level. One bump per PR, re-applied at the same level if another PR merges first and the base reaches it. A bump never authorizes tagging, publishing, merging or deploying.

@@ -1,5 +1,20 @@
 # Tekmetric API — Skill Reference
 
+## Contents
+
+- Environments
+- Authentication
+- Pagination
+- Core Endpoints
+- Date Formats
+- Error Handling
+- Monetary Values
+- Development Rules
+- Learnings (Undocumented Behaviors)
+- Elixir / Req Integration Pattern
+- Sync Strategy Summary
+- Local Development & Testing
+
 > **Bundled endpoint documentation**: See [Tekmetric-API.txt](Tekmetric-API.txt).
 > This skill focuses on patterns, gotchas, and integration knowledge that go beyond the raw docs.
 

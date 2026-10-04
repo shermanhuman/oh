@@ -1,5 +1,14 @@
 # Telnyx Call Control — Syntax Cheatsheet
 
+## Contents
+
+- Auth
+- Key Endpoints
+- Webhook Events
+- Go HTTP Client Pattern
+- Webhook Signature Verification
+- Gotchas
+
 ## Auth
 
 All requests: `Authorization: Bearer <TELNYX_API_KEY>`

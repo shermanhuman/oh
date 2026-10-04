@@ -1,5 +1,21 @@
 # WaxSeal 0.5 Skill
 
+## Contents
+
+- Core mental model
+- Non-interactive rule
+- Command tree
+- Adding a key (and creating a secret)
+- Changing a value
+- Rotation modes
+- Computed keys (connection strings)
+- Registering existing manifests
+- Health and CI
+- Prerequisites
+- Files
+- Never do
+- Migrating from 0.4 (memory aid)
+
 > Go CLI that keeps the plaintext of every Kubernetes secret in Google Secret Manager (GSM) and only ciphertext in Git. Verified against waxseal 0.5.0 (2026-09-18); check `waxseal --version` before relying on any command here.
 
 ## Core mental model

@@ -1,5 +1,17 @@
 # Postmark Email — Syntax Cheatsheet
 
+## Contents
+
+- Auth
+- Send Single Email
+- Body Fields Reference
+- Attachments Format
+- Batch Send
+- Error Codes
+- curl Example
+- Go Client Pattern
+- Gotchas
+
 ## Auth
 
 The email endpoints below require a server-level token:
