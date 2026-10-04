@@ -1,11 +1,11 @@
 ---
 name: pull-requests
-description: Step-by-step procedure for preparing, opening and updating a pull request where every PR is a release - worktree setup, local tests and end-to-end checks, review rounds until clean, the version bump, gh pr create, and recording each review round on the PR. Use before opening a PR, when pushing more commits to an open PR, when running or posting a review round, or when the user asks to ship, open or update a PR.
+description: Step-by-step procedure for preparing, opening and updating a pull request where every PR is a release - worktree setup, local tests and end-to-end checks, review rounds until no must-fix findings remain, the version bump, gh pr create, and recording each review round on the PR. Use before opening a PR, when pushing more commits to an open PR, when running or posting a review round, or when the user asks to ship, open or update a PR.
 ---
 
 # Pull request procedure
 
-The always-on pull-request rule sets the policy: a PR is a release, one PR per repository, worktrees until the PR, local tests, fresh reviewers until clean, reviews posted on the PR, and the user merges. This is the procedure behind it.
+The always-on pull-request rule sets the policy: a PR is a release, one PR per repository, worktrees until the PR, local tests, fresh reviewers until no must-fix findings remain, reviews posted on the PR, and the user merges. This is the procedure behind it.
 
 ## Which PR is yours
 
@@ -27,9 +27,17 @@ The always-on pull-request rule sets the policy: a PR is a release, one PR per r
    `--no-track` keeps the new branch from tracking the default branch, so a later `git push -u origin <branch>` sets the right upstream and status never compares against the default branch. To continue your open PR, add a worktree on that PR's branch instead (`git fetch`, then `git worktree add <path> <branch>`). Build, test and review there. The main checkout may hold someone else's changes or run their dev servers, so don't make PR changes in it; reading code there, or running a command the user asked for, is fine. Keep one worktree per batch of work, merge the default branch into it when it moves (merge, don't rebase), and remove the worktree once the PR has merged.
 2. **Build and test locally first.** Run the full test suites the way CI runs them (every configuration CI covers, such as each database or locale variant), the formatter check and a warnings-as-errors compile where the language has one. A failure that also fails on the default branch has to be shown failing there, not assumed.
 3. **Check user-facing changes end to end, locally.** When the repository has a local end-to-end setup (for example a browser test rig), run a scenario for every user-facing change and record what passed. For each key check, show once that it can fail: break the condition it checks (or invert the assertion), see it fail, then restore it. A check that has never failed may not be checking anything. When the repository has no end-to-end setup, say so in the PR and describe the manual check you ran instead.
-4. **Review until clean, before the PR opens.** Start a fresh review subagent and tell it to use the repository's review skill, plus the host's built-in code-review and security-review commands where it has them (in Claude Code, `/code-review high` and `/security-review`), on the full diff against the default branch. Where the host has no subagents, run a fresh review pass yourself that re-reads the full diff from the start, and say in the PR that you did.
-   - Fix every valid finding, nits included. A finding may be refuted with evidence (cite the code or a test showing it is wrong); only the user may waive a valid finding.
-   - Start a new reviewer after the fixes, and repeat until a round comes back clean. A reviewer that has already seen the code tends to accept its own earlier conclusions, which is why each round gets a fresh one.
+4. **Review before the PR opens, until no must-fix findings remain.** Start a fresh review subagent and tell it to use the repository's review skill, plus the host's built-in code-review and security-review commands where it has them (in Claude Code, `/code-review high` and `/security-review`), on the full diff against the default branch. Where the host has no subagents, run a fresh review pass yourself that re-reads the full diff from the start, and say in the PR that you did. Give the reviewer the decisions log (below) and ask it to sort every finding into one of two groups:
+   - **Must-fix:** wrong behaviour for a user, a security problem, data loss or corruption, a silent failure, a broken contract between components, or a rollout or migration that would fail.
+   - **Polish:** everything else: wording, naming, docs, small races with no real effect, test tidiness, style.
+
+   Then:
+   - **While a round has must-fix findings,** fix them (and that round's polish if it is cheap), and start a new reviewer for another full round. A reviewer that has already seen the code tends to accept its own earlier conclusions, which is why each round gets a fresh one.
+   - **The first round with no must-fix findings is the last full round.** Fix all of its polish in one pass, keeping each fix small (no redesign during the polish pass; a redesign is what makes the next round find new problems). Run the tests, then ask one reviewer for a quick check of only the polish diff, to confirm the fixes broke nothing. Anything new it raises is polish and is noted, not fixed, unless it is must-fix.
+   - **Cap: three full rounds.** If round three still finds must-fix issues, stop and tell the user what keeps recurring. Recurring must-fix findings usually point to a design that should be simplified, not to more review.
+   - Every valid finding is fixed in this process, or refuted with evidence (cite the code or a test showing it is wrong); only the user may waive a valid one.
+   - **Decisions log.** Keep a short list of the decisions the user or you made during the work (in the PR body or a file the reviewer reads). Reviewers don't reopen those decisions; they may flag one only as must-fix, with the harm it causes.
+   - **Ask reviewers to be brief:** no speculative findings, no "could be clearer", no repeats of earlier rounds; group polish findings.
 5. **Bump the version last,** using the `release` skill and the version-bump rule, once the work is tested and reviewed. An adequate bump already in this PR satisfies the rule. Take the number from the PR base at the time you open it, not from when the work started. If another PR merges first and the base reaches or passes your version, re-apply the same bump level to the base's version (a minor PR stays a minor bump).
 
 ## Opening the PR
@@ -51,7 +59,7 @@ Every review round is recorded on the PR, including the rounds run before it ope
 1. Post the **full review** as a PR comment. If you have no GitHub access from this host, put the reviews and the finding-by-finding outcome in your report to the user instead, and say that they are not on the PR yet.
 2. Address every finding: fix it, or refute it with evidence.
 3. Post a second comment listing each finding and what was done (the fix and its commit SHA, or the evidence).
-4. After every push of new commits (fixes, CI fixes, merges of the default branch), ask a fresh reviewer for another round, and repeat until a round is clean. A commit that only changes the version number (the bump, or a re-bump after another PR merged) needs no review round of its own.
+4. After pushing new commits, follow the same loop: must-fix fixes, CI fixes and merges of the default branch get a fresh full round; the final polish pass gets the quick diff-only check. A commit that only changes the version number (the bump, or a re-bump after another PR merged) needs no review round of its own.
 
 ## Merging
 

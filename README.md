@@ -51,7 +51,7 @@ Skills covering the tools, APIs, and infrastructure patterns used across my proj
 | Rule | Description |
 |------|-------------|
 | `mise` | Mise-first policy — mise first for tools; GitHub always through `mise exec -- gh` |
-| `pull-requests` | PRs are releases: one PR per repository, worktree until the PR, local tests and e2e, fresh reviewers until clean, reviews on the PR; the user merges. The procedure is in the `pull-requests` skill |
+| `pull-requests` | PRs are releases: one PR per repository, worktree until the PR, local tests and e2e, fresh reviewers until no must-fix findings remain (polish fixed in one pass, three-round cap), reviews on the PR; the user merges. The procedure is in the `pull-requests` skill |
 | `version-bump` | Every PR bumps the version, last — use the `release` skill |
 
 Rules are always on (they land in every session's `AGENTS.md`), so they hold only the policy; procedures live in skills that load when needed.
@@ -124,7 +124,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
-- 1.3.0: the always-on PR rule keeps only the policy; the procedure moved to the `pull-requests` skill. Release skill de-duplicated, with its migration runbook in a reference. Phoenix skill grown with LiveView, Ecto, migration and testing references. Reference guides gained a Contents list.
+- 1.3.0: the always-on PR rule keeps only the policy; the procedure moved to the `pull-requests` skill. Release skill de-duplicated, with its migration runbook in a reference. Phoenix skill grown with LiveView, Ecto, migration and testing references. Reference guides gained a Contents list. Review rounds now loop only on must-fix findings; polish is fixed in one pass with a quick diff check, and full rounds are capped at three.
 - 1.2.0: PRs are releases (worktree, local tests and e2e, review until clean, reviews on the PR); digest-pinned migrations in the release skill.
 - 1.0.0: version preparation separated from publishing; larger guides moved to `references/`.
 
