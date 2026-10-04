@@ -6,7 +6,7 @@ activation: always
 
 **A PR is a release.** Each PR means a build, a version bump and a rollout, so batch the work: finish it, test it and fix it locally, then open one PR per repository for the batch.
 
-- **One open PR per repository for your work.** Your PR is the one whose branch you (this session or this batch of work) created. Before opening a PR, check `mise exec -- gh pr list --state open`; if your PR is open and unmerged, push to its branch and update its description instead of opening another. Another person's or session's open PR (same GitHub account or not) does not block yours; whichever merges second merges or rebases onto the default branch and takes the next version (`version-bump.md`).
+- **One open PR per repository for your work.** Your PR is the one whose branch you (this session or this batch of work) created. Before opening a PR, check `mise exec -- gh pr list --state open`; if your PR is open and unmerged, push to its branch and update its description instead of opening another. Another person's or session's open PR (same GitHub account or not) does not block yours; whichever merges second merges the default branch into its own branch (no rebase or force-push, so posted commit SHAs stay valid) and takes the next version (`version-bump.md`).
 - **Several repositories, one release:** give the PR titles a common prefix so they read as one release (e.g. `vehicle-lists: …` in each repository). The prefix is the start of the title, in place of a conventional `type:`; a single-repository PR may use `type:` or a topic prefix.
 - **Check the PR is still open before pushing to it.** If it has been merged, start a new branch and worktree from the freshly fetched default branch.
 
