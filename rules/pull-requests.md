@@ -12,12 +12,13 @@ activation: always
 
 ## Before opening a PR
 
-1. **Build and test locally first.** Run the full test suites (every database collation CI runs), the formatter check and a warnings-as-errors compile. A failure that also fails on the default branch must be shown failing there, not assumed.
-2. **Test user-facing changes end to end in a browser, locally.** Run the local e2e rig with a scenario for every user-facing change, and record what passed. Prove each key check can fail once (invert it, see it fail, restore it).
-3. **Review until clean, before the PR opens.** Start a fresh review subagent and tell it to use the repository's review skill (plus `/code-review` and `/security-review`) on the full diff against the default branch.
+1. **Work in a git worktree until the PR.** Create a separate worktree and feature branch from the freshly fetched default branch (`git fetch`, then `git worktree add <path> -b <branch> origin/<default-branch>`), and build, test and review there. Never work in the main checkout: it may hold someone else's changes or run their dev servers. Keep one worktree per batch of work, merge the default branch into it when it moves, and remove the worktree once the PR has merged.
+2. **Build and test locally first.** Run the full test suites (every database collation CI runs), the formatter check and a warnings-as-errors compile. A failure that also fails on the default branch must be shown failing there, not assumed.
+3. **Test user-facing changes end to end in a browser, locally.** Run the local e2e rig with a scenario for every user-facing change, and record what passed. Prove each key check can fail once (invert it, see it fail, restore it).
+4. **Review until clean, before the PR opens.** Start a fresh review subagent and tell it to use the repository's review skill (plus `/code-review` and `/security-review`) on the full diff against the default branch.
    - **Fix every finding,** nits included. A finding is only left unfixed when the user decides so.
    - Start a **new** review subagent after the fixes, and repeat the cycle until a round comes back clean.
-4. **Bump the version** using the `release` skill and `version-bump.md`. An adequate bump already in this PR satisfies the rule. Take the number from the PR base at the time you open it, not from when the work started.
+5. **Bump the version** using the `release` skill and `version-bump.md`. An adequate bump already in this PR satisfies the rule. Take the number from the PR base at the time you open it, not from when the work started.
 
 ## Opening the PR
 
