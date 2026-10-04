@@ -1,6 +1,6 @@
 ---
 name: release
-description: Prepare a requested version bump or release using the repository’s actual version source and publishing workflow.
+description: Prepares a version bump or release from the repository's actual version source (herd.json, mix.exs, VERSION, tags) and publishes only when asked. Use when bumping a version, preparing a PR's version change, or when the user asks to tag, release or publish.
 ---
 
 # Version and release preparation
@@ -11,41 +11,30 @@ Identify the repository and requested action first. A **bump** changes version m
 
 Inspect `herd.json`, `VERSION`, `mix.exs`, package metadata, build scripts, tags, and `.github/workflows/`. More than one file can describe one product; do not ask which to release solely because multiple signals exist. Ask only when there are genuinely separate products and the target is unclear.
 
-- Herds: update top-level `herd.json.version`; inspect the repository's version-check gate.
+- Herds: update top-level `herd.json.version`. The version-check workflow compares it with the PR base and requires a strictly greater semver. Herd consumers read `herd.json`; no tag is needed for a herd bump. A conventional bump commit is `chore: bump X.Y.Z → X.Y.Z+1`, or include the bump in the scoped feature commit.
 - Elixir: update the actual application version in `mix.exs` or its configured source.
-- Go: `go.mod` is not an application version file. Honor `VERSION` or equivalent when present; otherwise inspect tag/build-flag conventions. A bump-only request in a tag-only project may need a proposed next version rather than creating a publishing tag.
+- Go: `go.mod`'s Go directive is not the product version. Honor `VERSION` or equivalent when present; otherwise inspect tag/build-flag conventions. With tag-only versioning, record the intended version in the PR instead of creating a publishing tag for a bump-only task.
 
 Use the requested semver level. Without one, infer patch for fixes, minor for compatible features, and major for breaking changes, subject to the project's pre-1.0 policy. Compare with the PR base and existing edits to avoid multiple bumps for the same PR. Do not reset a larger intentional bump.
 
-## Required command sequence
-
-Use mise for all managed CLI operations, including GitHub. Do not substitute another package manager or a different GitHub integration merely because it is available.
-
-1. Inspect `git status --short`, the current feature branch, the PR base, and the current version source. Keep unrelated edits intact.
-2. Compute the requested semver bump (when preparing a PR, do this after the work is tested and reviewed, as `pull-requests.md` orders it): major `X+1.0.0`, minor `X.Y+1.0`, patch `X.Y.Z+1`. For PR preparation, a version already increased appropriately over the base is sufficient.
-3. Edit `herd.json.version`, `mix.exs`'s application version, `VERSION`, or the repository's actual authoritative source; synchronize required copies.
-4. Validate: Go uses `mise exec -- go test ./...`; Elixir uses `mise exec -- mix precommit` when defined, otherwise `mise exec -- mix test` and `mise exec -- mix compile --warnings-as-errors`. For a herd, validate `herd.json`, skill frontmatter, resource links, and `mise exec -- promptherder check` in a fixture with that herd installed. Run configured repository checks too.
-5. For a requested PR, the steps above sit inside `pull-requests.md`'s order (worktree, local tests, end-to-end checks for user-facing changes, review rounds until clean, then the bump, then one PR per repository). Commit the scoped changes, push the feature branch, and run `mise exec -- gh pr create --base <default-branch> --head <feature-branch> --title '<title>' --body-file <body-file>`. Update the existing PR when one already exists. Do not tag as part of this step.
-
-If mise cannot supply a particular tool, follow the mise policy's documented fallback; do not silently choose another installer. If a required check is unavailable, report the exact blocker instead of claiming it passed.
-
 ## Prepare
 
-Inspect the working tree and preserve unrelated edits. A dirty tree is normal during feature preparation, not a reason to discard changes or force a clean-tree approval. Work on the appropriate feature branch; do not switch to main just to bump a version. Edit the authoritative metadata and any required synchronized copies. Run applicable validation and reuse already-valid checks when no affected code changed.
-
-Stop here for a bump-only request and report the old/new version and changed files. If the user requested a PR, continue through the PR workflow without tagging or publishing.
+1. Inspect `git status --short`, the current feature branch, the PR base, and the current version source. Keep unrelated edits intact: a dirty tree is normal during feature preparation, not a reason to discard changes or force a clean-tree approval. Work on the appropriate feature branch; do not switch to main just to bump a version.
+2. Compute the requested semver bump (when preparing a PR, do this after the work is tested and reviewed, as the `pull-requests` skill orders it): major `X+1.0.0`, minor `X.Y+1.0`, patch `X.Y.Z+1`. For PR preparation, a version already increased appropriately over the base is sufficient.
+3. Edit `herd.json.version`, `mix.exs`'s application version, `VERSION`, or the repository's actual authoritative source; synchronize required copies.
+4. Validate: Go uses `mise exec -- go test ./...`; Elixir uses `mise exec -- mix precommit` when defined, otherwise `mise exec -- mix test` and `mise exec -- mix compile --warnings-as-errors`. For a herd, validate `herd.json`, skill frontmatter, resource links, and `mise exec -- promptherder check` in a fixture with that herd installed. Run configured repository checks too, and reuse already-valid checks when no affected code changed. If a required check is unavailable, report the exact blocker instead of claiming it passed.
+5. For a bump-only request, stop here and report the old/new version and changed files. For a requested PR, follow the `pull-requests` skill; do not tag in this step.
 
 ## Publish when requested
 
-Inspect actual release automation before creating tags: some repositories tag from VERSION after a merge, others publish on a manually pushed tag. Do not add a second trigger or assume `.goreleaser.yml` proves a CI trigger exists. Verify the exact commit, version, required checks, and destination before the authorized publish step. Never include unrelated uncommitted changes in a release commit.
+Inspect actual release automation before creating tags: some repositories tag from VERSION after a merge, others publish on a manually pushed tag. Do not add a second trigger or assume `.goreleaser.yml` proves a CI trigger exists. If automation creates tags from VERSION, use that workflow instead of creating a duplicate tag.
 
-Track the specific release/tag workflow and commit, not merely the newest CI run. Report the exact artifact/tag and checks. A release does not automatically authorize production rollout, secret rotation, or database migration. Leave those actions to the repository's deployment process and the user's requested scope.
+1. Verify the exact reviewed commit, version, required checks, and destination, and that the tag does not already exist. Never include unrelated uncommitted changes in a release commit.
+2. For a tag-driven release, create `git tag vX.Y.Z <commit>` and push that exact tag. Do not push main or merge a PR; those are the user's steps.
+3. Track the specific release/tag workflow and commit, not merely the newest CI run: `mise exec -- gh run list --commit <sha>`, then `mise exec -- gh run view <run-id>`. For a GitHub release, verify `mise exec -- gh release view vX.Y.Z`.
+4. Report previous/new version, commit/tag, CI result, and artifact URL. Report a failed or pending publication honestly; do not substitute the newest unrelated successful run.
 
-## Publication checklist
-
-For an explicitly requested tag-driven release, verify the exact reviewed commit and that the tag does not already exist, then create `git tag vX.Y.Z <commit>` and push that exact tag. Do not push main or merge a PR; those are human tasks under this repository policy. If automation creates tags from VERSION, use that workflow instead of creating a duplicate tag.
-
-Use `mise exec -- gh run list --commit <sha>` to find the matching run and `mise exec -- gh run view <run-id>` to inspect it. For a GitHub release, verify `mise exec -- gh release view vX.Y.Z`. Report previous/new version, commit/tag, CI result, and artifact URL. Report a failed or pending publication honestly; do not substitute the newest unrelated successful run.
+A release does not automatically authorize production rollout, secret rotation, or database migration. Leave those actions to the repository's deployment process and the user's requested scope.
 
 ## Project-specific release checks
 
@@ -53,7 +42,7 @@ Use `mise exec -- gh run list --commit <sha>` to find the matching run and `mise
 
 Read the application version from `project/0` in `mix.exs` or the source it references. Apps using `@version Mix.Project.config()[:version]` bake the version at compile time: rebuild after the bump so the UI/footer is updated. Inspect whether CI deploys on a branch, a tag, or a manual trigger; a branch-triggered deployment is not itself a broken tag workflow.
 
-When the app uses database migrations, every release runs the repository's migration procedure before the app restarts (also a release with no migrations of its own: it confirms the schema is current and pins the restart to the migrated image); include it in the handoff. Never `kubectl create -f` a whole manifest file: such a file can hold other apps' Jobs or an existing NetworkPolicy, and a Job left on a moving tag such as `:latest` can pull the previous release, find nothing to migrate and exit 0. Run only the migration Job, pinned to the release's image digest, wait for it, and save its log before the Job is cleaned up. When the repository provides a migration script (for example `scripts/run-migration.sh` that prints the digest it migrated), use it: if it fails or prints no digest, **stop: do not restart the app; the release is not migrated**, and report the error and the saved log. Proceed only when the saved log lists the release's new migration versions as applied, or reports that migrations were already up after a rerun and those versions are confirmed with a read-only query of the migrations table (for a release with no migrations of its own, "already up" is enough). Then restart through the repository's deploy script with the migrated digest (for example `EXPECT_DIGEST="$digest" scripts/deploy.sh <app-name>`), which must refuse to restart onto any other image, and run the repository's post-restart checks. Run `kubectl` and these scripts through `mise exec --` when the shell is not mise-activated, following the repository's own mise notes. Follow the repository's README where it differs. Run these only as part of an authorized deployment, with the actual context and namespace checked. Prefer the connected Kubernetes MCP for supported operations under the mise rule.
+When the app uses database migrations, every release runs the migration procedure before the app restarts: read [references/phoenix-migrations.md](references/phoenix-migrations.md) and follow it exactly.
 
 ### Go
 
@@ -67,10 +56,6 @@ ldflags:
 ```
 
 Use the symbols the application actually declares. If a released binary shows `dev`, inspect the build's `ldflags` and version source. When `VERSION` is tracked, update it; do not assume every Go project versions only through tags.
-
-### Promptherder herds
-
-Bump top-level `herd.json.version` before a PR. The version-check workflow compares it with the PR base and requires a strictly greater semver. Herd consumers read `herd.json`; no tag is needed for a herd version bump. A conventional bump commit is `chore: bump X.Y.Z → X.Y.Z+1`, or include the bump in the scoped feature commit.
 
 ## Release summary
 
