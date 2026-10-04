@@ -25,7 +25,7 @@ Use mise for all managed CLI operations, including GitHub. Do not substitute ano
 2. Compute the requested semver bump: major `X+1.0.0`, minor `X.Y+1.0`, patch `X.Y.Z+1`. For PR preparation, a version already increased appropriately over the base is sufficient.
 3. Edit `herd.json.version`, `mix.exs`'s application version, `VERSION`, or the repository's actual authoritative source; synchronize required copies.
 4. Validate: Go uses `mise exec -- go test ./...`; Elixir uses `mise exec -- mix precommit` when defined, otherwise `mise exec -- mix test` and `mise exec -- mix compile --warnings-as-errors`. For a herd, validate `herd.json`, skill frontmatter, resource links, and `mise exec -- promptherder check` in a fixture with that herd installed. Run configured repository checks too.
-5. For a requested PR, commit the scoped changes, push the feature branch, and run `mise exec -- gh pr create --base <default-branch> --head <feature-branch> --title '<title>' --body-file <body-file>`. Update the existing PR when one already exists. Do not tag as part of this step.
+5. For a requested PR, first follow `pull-requests.md` (local tests, browser e2e for user-facing changes, review rounds until clean, one PR per repository), then commit the scoped changes, push the feature branch, and run `mise exec -- gh pr create --base <default-branch> --head <feature-branch> --title '<title>' --body-file <body-file>`. Update the existing PR when one already exists. Do not tag as part of this step.
 
 If mise cannot supply a particular tool, follow the mise policy's documented fallback; do not silently choose another installer. If a required check is unavailable, report the exact blocker instead of claiming it passed.
 
