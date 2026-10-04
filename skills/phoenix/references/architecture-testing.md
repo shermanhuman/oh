@@ -116,7 +116,7 @@ end
 - Use `assert_patch/2`, `assert_redirect/2` and `follow_redirect/3` for navigation, and `render_async/2` to wait for `assign_async`, `stream_async` and `start_async` work. `open_browser/1` helps when debugging.
 - Test function components with `render_component/2` or the `~H` sigil plus `rendered_to_string/1`.
 - LiveView 1.1 moved `Phoenix.LiveViewTest` from Floki to LazyHTML. Selectors like `:has()` and `:is()` work, and the Floki-only `fl-contains` is replaced by the `text_filter` argument.
-- LiveView 1.2 warns in tests about issues such as duplicate DOM ids and forms without an `id`. The `:test_warnings` config controls whether these raise, warn or are ignored.
+- LiveView 1.2 checks rendered HTML in tests. By default a duplicate DOM id or duplicate LiveComponent raises, and a form without an `id` warns. Change this with `config :phoenix_live_view, :test_warnings` (keys `:duplicate_id`, `:duplicate_live_component`, `:missing_form_id`; values `:raise`, `:warn`, `:ignore`), or per test with the `on_error:` option of `live/3`.
 
 ## Sources
 
@@ -129,5 +129,6 @@ end
 - https://ecto-sql.hexdocs.pm/Ecto.Adapters.SQL.Sandbox.html
 - https://phoenix-live-view.hexdocs.pm/Phoenix.LiveViewTest.html
 - https://phoenix-live-view.hexdocs.pm/changelog.html (1.2 test warnings)
+- https://phoenix-live-view.hexdocs.pm/Phoenix.LiveViewTest.html (`on_error`, `:test_warnings`)
 - https://www.phoenixframework.org/blog/phoenix-liveview-1-1-released (LazyHTML)
 - https://github.com/phoenixframework/phoenix/tree/v1.8.15/priv/templates (phx.gen.context, phx.gen.live, live_test templates)

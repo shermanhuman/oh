@@ -5,7 +5,7 @@ description: Configures, inspects and troubleshoots Promptherder 1.x herds and t
 
 # Promptherder 1.x
 
-Install and upgrade it through mise: `mise use -g ubi:shermanhuman/promptherder`.
+Install and upgrade it through mise: `mise use -g github:shermanhuman/promptherder`.
 
 Select targets explicitly: `promptherder install codex claude`, or interactive `install` with nothing preselected. `install none` saves no targets. Use `target list`, `target add`, and `target remove`; run bare `promptherder` to apply the selection. No host is a default.
 

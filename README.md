@@ -11,7 +11,7 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 
 ```bash
 # Install promptherder (through mise)
-mise use -g ubi:shermanhuman/promptherder
+mise use -g github:shermanhuman/promptherder
 
 # Select targets explicitly (Promptherder 1.x)
 promptherder install codex claude
