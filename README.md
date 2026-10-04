@@ -50,7 +50,7 @@ Skills covering the tools, APIs, and infrastructure patterns used across my proj
 | Rule | Description |
 |------|-------------|
 | `mise` | Mise-first policy — mise first for tools; GitHub always through `mise exec -- gh` |
-| `pull-requests` | Merging is a human task — agents create feature PRs; humans merge |
+| `pull-requests` | PRs are releases: work in a worktree, test and review until clean locally, one PR per repository, reviews recorded on the PR; humans merge |
 | `version-bump` | Bump version before opening PRs — use the `release` skill |
 
 ## Structure
