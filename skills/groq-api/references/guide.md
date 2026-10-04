@@ -1,5 +1,16 @@
 # Groq Whisper — Syntax Cheatsheet
 
+## Contents
+
+- Auth
+- Transcription Endpoint
+- Available Models
+- Prompt Engineering for Jargon
+- Translation Endpoint
+- curl Example
+- Go Client Pattern
+- Gotchas
+
 ## Auth
 
 All requests: `Authorization: Bearer <GROQ_API_KEY>`
