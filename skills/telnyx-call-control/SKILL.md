@@ -1,6 +1,6 @@
 ---
 name: telnyx-call-control
-description: Syntax cheatsheet for Telnyx Voice API v2 Call Control. Covers inbound call handling, answer, playback, recording, and webhook events.
+description: Syntax cheatsheet for Telnyx Voice API v2 Call Control - inbound call handling, answer, playback, recording and webhook events. Use when writing or debugging Telnyx voice call code or call-control webhooks.
 ---
 
 # telnyx-call-control
