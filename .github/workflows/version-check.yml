@@ -15,48 +15,36 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check version was bumped
+      - name: Each changed plugin bumps its version
         run: |
           set -euo pipefail
 
           BASE_REF="${{ github.event.pull_request.base.ref }}"
           git fetch origin "$BASE_REF"
+          failed=0
 
-          PR_VERSION=$(grep -oP '"version":\s*"\K[^"]+' herd.json || true)
-          MAIN_VERSION=$(git show "origin/$BASE_REF:herd.json" 2>/dev/null | grep -oP '"version":\s*"\K[^"]+' || true)
+          for dir in plugins/*/; do
+            dir=${dir%/}
+            manifest="$dir/.claude-plugin/plugin.json"
+            if git diff --quiet "origin/$BASE_REF...HEAD" -- "$dir"; then
+              continue
+            fi
+            pr=$(jq -r '.version // empty' "$manifest")
+            base=$(git show "origin/$BASE_REF:$manifest" 2>/dev/null | jq -r '.version // empty' || true)
+            if [ -z "$pr" ]; then
+              echo "::error file=$manifest::no version"; failed=1; continue
+            fi
+            if [ -z "$base" ]; then
+              echo "✓ $dir: new plugin at $pr"; continue
+            fi
+            IFS='.' read -r a b c <<< "$pr"
+            IFS='.' read -r x y z <<< "$base"
+            if (( a < x )) || (( a == x && b < y )) || (( a == x && b == y && c <= z )); then
+              echo "::error file=$manifest::$dir changed but its version $pr is not greater than $base. Installed copies only update when the version changes."
+              failed=1
+            else
+              echo "✓ $dir: $base → $pr"
+            fi
+          done
 
-          if [ -z "$PR_VERSION" ]; then
-            echo "::error::Could not extract version from herd.json."
-            exit 1
-          fi
-
-          echo "PR version:   $PR_VERSION"
-          echo "Base version: $MAIN_VERSION"
-
-          if [ -z "$MAIN_VERSION" ]; then
-            echo "✓ No version on base branch — first version: $PR_VERSION"
-            exit 0
-          fi
-
-          if [ "$PR_VERSION" = "$MAIN_VERSION" ]; then
-            echo ""
-            echo "::error::Version has not been bumped. Update the version in herd.json before merging."
-            echo "Current version on $BASE_REF: $MAIN_VERSION"
-            echo "Bump minor for features, patch for fixes."
-            exit 1
-          fi
-
-          # Enforce version is greater, not just different (no downgrades).
-          IFS='.' read -r PR_MAJOR PR_MINOR PR_PATCH <<< "$PR_VERSION"
-          IFS='.' read -r MAIN_MAJOR MAIN_MINOR MAIN_PATCH <<< "$MAIN_VERSION"
-
-          if (( PR_MAJOR < MAIN_MAJOR )) || \
-             (( PR_MAJOR == MAIN_MAJOR && PR_MINOR < MAIN_MINOR )) || \
-             (( PR_MAJOR == MAIN_MAJOR && PR_MINOR == MAIN_MINOR && PR_PATCH <= MAIN_PATCH )); then
-            echo ""
-            echo "::error::Version must be greater than base. Got $PR_VERSION, base has $MAIN_VERSION."
-            echo "Bump minor for features, patch for fixes."
-            exit 1
-          fi
-
-          echo "✓ Version bumped: $MAIN_VERSION → $PR_VERSION"
+          exit $failed

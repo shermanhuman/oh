@@ -1,0 +1,35 @@
+name: Plugin Check
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  check:
+    name: Manifests and hook build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Manifests are valid JSON
+        run: |
+          set -euo pipefail
+          for f in plugins/*/.claude-plugin/plugin.json plugins/*/hooks/*.json; do
+            jq empty "$f"
+          done
+
+      - name: Skills have a name matching their folder and a description
+        run: |
+          set -euo pipefail
+          for skill in plugins/*/skills/*/SKILL.md; do
+            dir=$(basename "$(dirname "$skill")")
+            name=$(awk '/^---$/{n++; next} n==1 && /^name:/{print $2; exit}' "$skill")
+            desc=$(awk '/^---$/{n++; next} n==1 && /^description:/{print; exit}' "$skill")
+            [ "$name" = "$dir" ] || { echo "::error file=$skill::name '$name' does not match folder '$dir'"; exit 1; }
+            [ -n "$desc" ] || { echo "::error file=$skill::missing description"; exit 1; }
+          done
+
+      - name: Always-on hook output is up to date
+        run: python3 scripts/build-hooks.py --check

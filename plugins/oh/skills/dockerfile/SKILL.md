@@ -90,7 +90,8 @@ node_modules
 .dockerignore
 Dockerfile
 .github
-.promptherder
+.claude
+.codex
 ```
 
 ## Multi-Stage Structure
