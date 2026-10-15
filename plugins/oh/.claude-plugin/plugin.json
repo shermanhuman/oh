@@ -1,6 +1,6 @@
 {
   "name": "oh",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Sherman's working agreements for Claude Code and Codex: mise first, pull requests as releases, version bumps, reviewer choices, plus release, waxseal, mise and Dockerfile skills.",
   "author": {
     "name": "Sherman Boyd",
