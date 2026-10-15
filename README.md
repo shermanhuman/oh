@@ -11,7 +11,7 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 
 | Plugin | What it holds | Where it's on |
 |---|---|---|
-| `oh` | Always-on: mise first, pull requests are releases, version bump per PR, reviewer choices (Fable high reviewers; Astra high through `codex exec` as the second voice). Skills: `pull-requests`, `release`, `mise`, `waxseal`, `dockerfile` | everywhere |
+| `oh` | Always-on: mise first, pull requests are releases, version bump per PR, questions with their context inside, reviewer choices (Fable high reviewers; Astra high through `codex exec` as the second voice). Skills: `pull-requests`, `release`, `mise`, `waxseal`, `dockerfile` | everywhere |
 | `oh-phoenix` | `phoenix` (LiveView, Ecto, migrations, architecture and testing references), `daisyui` | Elixir repositories |
 | `oh-tekmetric` | `tekmetric-api` with the full endpoint catalog | repositories that sync Tekmetric |
 | `oh-telnyx` | `telnyx-call-control` | voice/SMS repositories |
@@ -63,7 +63,7 @@ Project settings override user settings, and git worktrees of the repository pic
 enabled = true
 ```
 
-Codex reads a project's `.codex/config.toml` only once the project is trusted; trust the main checkout once and its worktrees follow.
+Codex reads a project's `.codex/config.toml` only once that project is trusted: trust each repository's main checkout once (a trusted parent folder doesn't count) and its worktrees follow.
 
 ### Codex notes
 
@@ -72,7 +72,7 @@ Codex reads a project's `.codex/config.toml` only once the project is trusted; t
 
 ## Upgrading from 1.x
 
-1.x was a [Promptherder](https://github.com/shermanhuman/promptherder) herd. In each repository that pulled it: remove `oh` from `.promptherder/` (the herd, `lock.json` entry and settings), delete the generated output it produced (`AGENTS.md`/`CLAUDE.md` sections, `.claude/skills/`, `.agents/skills/` copies of `mise`, `pull-requests`, `release`, `phoenix` and the rest) while keeping any hand-written instructions, then install the plugins as above and switch the stack and API plugins on per repository.
+1.x was a [Promptherder](https://github.com/shermanhuman/promptherder) herd. In each repository that pulled it: remove `oh` from `.promptherder/` (the herd and its `lock.json` entry), delete the generated output it produced (`AGENTS.md`/`CLAUDE.md` sections, `.claude/skills/`, `.agents/skills/` copies of `mise`, `pull-requests`, `release`, `phoenix` and the rest) while keeping any hand-written instructions, then install the plugins as above and switch the stack and API plugins on per repository.
 
 ## Updating
 
@@ -84,6 +84,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.1.0: always-on *Questions* rule — the context for a multiple-choice question goes inside the question, one decision per question when the topic is unfamiliar, plain text when the user asks to clarify.
 - 2.0.0: Promptherder herd → six Claude Code and Codex plugins. Always-on rules move into the `oh` plugin's session-start hook; the review procedure moves to `compound-v:review-loop`, with `oh` naming the reviewers (Fable high, Astra high via `codex exec`); stack and API skills become per-repository plugins; the `promptherder` skill is gone.
 - 1.3.0: the always-on PR rule keeps only the policy; the procedure moved to the `pull-requests` skill. Review rounds loop only on must-fix findings.
 - 1.2.0: PRs are releases (worktree, local tests and e2e, review until clean, reviews on the PR); digest-pinned migrations in the release skill.
