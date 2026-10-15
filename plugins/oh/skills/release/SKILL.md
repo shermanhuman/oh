@@ -20,10 +20,10 @@ Use the requested semver level. Without one, infer patch for fixes, minor for co
 ## Prepare
 
 1. Inspect `git status --short`, the current feature branch, the PR base, and the current version source. Keep unrelated edits intact: a dirty tree is normal during feature preparation, not a reason to discard changes or force a clean-tree approval. Work on the appropriate feature branch; do not switch to main just to bump a version.
-2. Compute the requested semver bump (when preparing a PR, do this after the work is tested and reviewed, as the `pull-requests` skill orders it): major `X+1.0.0`, minor `X.Y+1.0`, patch `X.Y.Z+1`. For PR preparation, a version already increased appropriately over the base is sufficient.
+2. Compute the requested semver bump (when preparing a PR, do this after the work is tested and reviewed, as the `oh:pull-requests` skill orders it): major `X+1.0.0`, minor `X.Y+1.0`, patch `X.Y.Z+1`. For PR preparation, a version already increased appropriately over the base is sufficient.
 3. Edit the plugin manifest's `version`, `mix.exs`'s application version, `VERSION`, or the repository's actual authoritative source; synchronize required copies.
 4. Validate: Go uses `mise exec -- go test ./...`; Elixir uses `mise exec -- mix precommit` when defined, otherwise `mise exec -- mix test` and `mise exec -- mix compile --warnings-as-errors`. For a plugin, run `claude plugin validate <plugin dir>` (and the marketplace folder, if it changed), and check skill frontmatter and resource links. Run configured repository checks too, and reuse already-valid checks when no affected code changed. If a required check is unavailable, report the exact blocker instead of claiming it passed.
-5. For a bump-only request, stop here and report the old/new version and changed files. For a requested PR, follow the `pull-requests` skill; do not tag in this step.
+5. For a bump-only request, stop here and report the old/new version and changed files. For a requested PR, follow the `oh:pull-requests` skill; do not tag in this step.
 
 ## Publish when requested
 

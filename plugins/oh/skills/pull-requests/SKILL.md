@@ -5,13 +5,13 @@ description: Step-by-step procedure for preparing, opening and updating a pull r
 
 # Pull request procedure
 
-The always-on pull-request rule sets the policy: a PR is a release, one PR per repository, worktrees until the PR, local tests, fresh reviewers until no must-fix findings remain, reviews posted on the PR, and the user merges. This is the procedure behind it.
+The always-on *Pull requests are releases* section of the `oh` hook sets the policy: a PR is a release, one PR per repository, worktrees until the PR, local tests, fresh reviewers until no must-fix findings remain, reviews posted on the PR, and the user merges. This is the procedure behind it.
 
 ## Which PR is yours
 
 - Your PR is the one whose branch you (this session or this batch of work) created. In a new session, treat a PR as yours when the user points you to it or its branch is the one you are continuing; otherwise ask once.
 - Before opening a PR, run `mise exec -- gh pr list --state open`. If your PR is open and unmerged, push to its branch and update its description instead of opening another.
-- Another person's or session's open PR (same GitHub account or not) does not block yours. Whichever merges second merges the default branch into its own branch (no rebase or force-push, so posted commit SHAs stay valid) and takes the next version under the version-bump rule.
+- Another person's or session's open PR (same GitHub account or not) does not block yours. Whichever merges second merges the default branch into its own branch (no rebase or force-push, so posted commit SHAs stay valid) and takes the next version under the hook's *Version bumps* section.
 - Check that the PR is still open before each push to it (`mise exec -- gh pr view <number> --json state`). If it has been merged, start a new branch and worktree from the freshly fetched default branch.
 - Several repositories, one release: give the PR titles a common prefix so they read as one release (for example `vehicle-lists: …` in each repository). The prefix is the start of the title, in place of a conventional `type:`; a single-repository PR may use `type:` or a topic prefix.
 
@@ -28,7 +28,7 @@ The always-on pull-request rule sets the policy: a PR is a release, one PR per r
 2. **Build and test locally first.** Run the full test suites the way CI runs them (every configuration CI covers, such as each database or locale variant), the formatter check and a warnings-as-errors compile where the language has one. A failure that also fails on the default branch has to be shown failing there, not assumed.
 3. **Check user-facing changes end to end, locally.** When the repository has a local end-to-end setup (for example a browser test rig), run a scenario for every user-facing change and record what passed. For each key check, show once that it can fail: break the condition it checks (or invert the assertion), see it fail, then restore it. A check that has never failed may not be checking anything. When the repository has no end-to-end setup, say so in the PR and describe the manual check you ran instead.
 4. **Review before the PR opens.** Run `compound-v:review-loop` on the full diff against the default branch: round 1 with `compound-v:review`, `compound-v:followup` rounds on each fix diff, the independent full-diff pass, then one polish pass. Keep the decisions table from the plan (or start one) in the PR body or a file the reviewers read. Before opening, remove any debug output, temporary logging and stray TODOs you added.
-5. **Bump the version last,** using the `release` skill and the version-bump rule, once the work is tested and reviewed. An adequate bump already in this PR satisfies the rule. Take the number from the PR base at the time you open it, not from when the work started. If another PR merges first and the base reaches or passes your version, re-apply the same bump level to the base's version (a minor PR stays a minor bump).
+5. **Bump the version last,** using the `oh:release` skill and the hook's *Version bumps* section, once the work is tested and reviewed. An adequate bump already in this PR satisfies it. Take the number from the PR base at the time you open it, not from when the work started. If another PR merges first and the base reaches or passes your version, re-apply the same bump level to the base's version (a minor PR stays a minor bump).
 
 ## Opening the PR
 
@@ -40,13 +40,11 @@ body=$(mktemp "${TMPDIR:-/tmp}/pr-body.XXXXXX")
 mise exec -- gh pr create --title "<prefix>: short description" --body-file "$body" --base <default-branch> --head <branch>
 ```
 
-Describe the final change, migrations, rollout steps, and the checks actually run (suites, end-to-end scenarios, review rounds). Update the existing PR when continuing the same work.
+Describe the final change, migrations and rollout steps, and report the checks you actually ran with their exact commands and results (suites, end-to-end scenarios, review rounds), not a summary like "tests pass". Update the existing PR when continuing the same work.
 
 ## Reviews on the PR
 
 `compound-v:review-loop` records every round on the PR: each review as a comment, then a fix-notes comment answering each finding by ID with the fix's commit SHA or the evidence. Rounds run before the PR opened are posted when it opens. If you have no GitHub access from this host, put the reviews and the finding-by-finding outcome in your report to the user instead, and say they aren't on the PR yet.
-
-In the PR description, report the checks you actually ran with their exact commands and results (suites, end-to-end scenarios, review rounds), not a summary like "tests pass".
 
 ## Merging
 

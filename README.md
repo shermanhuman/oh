@@ -22,14 +22,18 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 
 The plugins are listed in the Compound V marketplace (this repository has none of its own, so nothing gets installed twice).
 
+`oh` builds on Compound V (its review loop and plan format), so install that too.
+
 ```text
 # Claude Code
 /plugin marketplace add shermanhuman/compound-v
+/plugin install compound-v@compound-v
 /plugin install oh@compound-v
 /plugin install oh-phoenix@compound-v      # and the other oh-* plugins
 
 # Codex
 codex plugin marketplace add shermanhuman/compound-v
+codex plugin add compound-v@compound-v
 codex plugin add oh@compound-v
 codex plugin add oh-phoenix@compound-v     # and the other oh-* plugins
 ```
@@ -63,8 +67,12 @@ Codex reads a project's `.codex/config.toml` only once the project is trusted; t
 
 ### Codex notes
 
-- **Hooks.** The `oh` and `compound-v` always-on rules arrive through session-start hooks. Codex skips plugin hooks, silently, until you trust them: open `/hooks` once and trust both. `codex exec` runs (Astra reviews) skip hooks; their briefs carry what they need.
+- **Hooks.** The `oh` and `compound-v` always-on rules arrive through session-start hooks. Codex skips plugin hooks, silently, until you trust them: open `/hooks` once and trust both. A `codex exec` run skips hooks you haven't trusted; Astra review briefs carry what they need either way.
 - **Questions.** Codex's multiple-choice question tool is only available in Plan mode by default. To allow it in Default mode, enable the `default_mode_request_user_input` feature (`codex features`).
+
+## Upgrading from 1.x
+
+1.x was a [Promptherder](https://github.com/shermanhuman/promptherder) herd. In each repository that pulled it: remove `oh` from `.promptherder/` (the herd, `lock.json` entry and settings), delete the generated output it produced (`AGENTS.md`/`CLAUDE.md` sections, `.claude/skills/`, `.agents/skills/` copies of `mise`, `pull-requests`, `release`, `phoenix` and the rest) while keeping any hand-written instructions, then install the plugins as above and switch the stack and API plugins on per repository.
 
 ## Updating
 
