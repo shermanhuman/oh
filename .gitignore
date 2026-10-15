@@ -1,17 +1,2 @@
-# Promptherder generated artifacts (syncing inside this repo)
-.promptherder/*
-!.promptherder/hard-rules.md
-.agent/
-.agents/
-.antigravity/
-.claude/
-.cline/
-.clinerules/
-.cursor/
-.windsurf/
-.github/prompts/
-.github/instructions/
-.github/skills/
-.github/copilot-instructions.md
-AGENTS.md
-CLAUDE.md
+__pycache__/
+.claude/settings.local.json

@@ -1,0 +1,12 @@
+{
+  "name": "oh-phoenix",
+  "version": "1.0.0",
+  "description": "Phoenix, LiveView, Ecto, migrations and DaisyUI patterns with focused references.",
+  "author": {
+    "name": "Sherman Boyd",
+    "url": "https://github.com/shermanhuman"
+  },
+  "homepage": "https://github.com/shermanhuman/oh",
+  "repository": "https://github.com/shermanhuman/oh",
+  "license": "MIT"
+}

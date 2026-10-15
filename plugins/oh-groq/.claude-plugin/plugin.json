@@ -1,0 +1,12 @@
+{
+  "name": "oh-groq",
+  "version": "1.0.0",
+  "description": "Groq API: Whisper transcription and audio processing.",
+  "author": {
+    "name": "Sherman Boyd",
+    "url": "https://github.com/shermanhuman"
+  },
+  "homepage": "https://github.com/shermanhuman/oh",
+  "repository": "https://github.com/shermanhuman/oh",
+  "license": "MIT"
+}

@@ -1,0 +1,12 @@
+{
+  "name": "oh-tekmetric",
+  "version": "1.0.0",
+  "description": "Tekmetric REST API: auth, pagination, sync patterns and undocumented behaviour, with the full endpoint catalog.",
+  "author": {
+    "name": "Sherman Boyd",
+    "url": "https://github.com/shermanhuman"
+  },
+  "homepage": "https://github.com/shermanhuman/oh",
+  "repository": "https://github.com/shermanhuman/oh",
+  "license": "MIT"
+}

@@ -17,4 +17,4 @@ When the app uses database migrations, every release runs the repository's migra
 
 ## Where it runs
 
-Run `kubectl` and these scripts through `mise exec --` when the shell is not mise-activated, following the repository's own mise notes. Run them only as part of an authorized deployment, with the actual context and namespace checked. Prefer the connected Kubernetes MCP for supported operations under the mise rule.
+Run `kubectl` and these scripts through `mise exec --` when the shell is not mise-activated, following the repository's own mise notes. Run them only as part of an authorized deployment, with the actual context and namespace checked. Prefer the connected Kubernetes MCP for supported operations, as the `oh` hook's *Mise first* section says.

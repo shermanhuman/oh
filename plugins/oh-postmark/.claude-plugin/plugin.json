@@ -1,0 +1,12 @@
+{
+  "name": "oh-postmark",
+  "version": "1.0.0",
+  "description": "Postmark API: transactional and batch email, attachments.",
+  "author": {
+    "name": "Sherman Boyd",
+    "url": "https://github.com/shermanhuman"
+  },
+  "homepage": "https://github.com/shermanhuman/oh",
+  "repository": "https://github.com/shermanhuman/oh",
+  "license": "MIT"
+}

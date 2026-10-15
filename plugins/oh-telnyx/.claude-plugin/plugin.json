@@ -1,0 +1,12 @@
+{
+  "name": "oh-telnyx",
+  "version": "1.0.0",
+  "description": "Telnyx Voice API v2 call control: call handling, recording and webhook events.",
+  "author": {
+    "name": "Sherman Boyd",
+    "url": "https://github.com/shermanhuman"
+  },
+  "homepage": "https://github.com/shermanhuman/oh",
+  "repository": "https://github.com/shermanhuman/oh",
+  "license": "MIT"
+}
