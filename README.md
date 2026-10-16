@@ -67,7 +67,8 @@ Codex reads a project's `.codex/config.toml` only once that project is trusted: 
 
 ### Codex notes
 
-- **Hooks.** The `oh` and `compound-v` always-on rules arrive through session-start hooks. Codex skips plugin hooks, silently, until you trust them: open `/hooks` once and trust both (oh has two: the session-start rules and the waxseal guard). The guard needs `python3`; if it's missing, the hook errors and the command goes ahead. A `codex exec` run skips hooks you haven't trusted; Astra review briefs carry what they need either way.
+- **The waxseal guard** checks what a command would run, not what it mentions: commit messages, PR bodies, `grep` patterns and heredocs written to documents pass, while heredocs fed to a shell or interpreter, `bash -c`/`ssh`/`eval` strings, `$(…)`, and script files about to run (`python3 x.py`, `bash x.sh`, `go run x.go`) are read first. It is a backstop for the rule, not a sandbox: a URL assembled at runtime, a script fetched and piped in, or code it can't parse gets through. It is off inside waxseal's and oh's own source trees.
+- **Hooks.** The `oh` and `compound-v` always-on rules arrive through session-start hooks. Codex skips plugin hooks, silently, until you trust them: open `/hooks` once and trust both (oh has two: the session-start rules and the waxseal guard). Trust is tied to the hook's contents, so after an oh update Codex asks again. The guard needs `python3`; if it's missing, the hook errors and the command goes ahead. A `codex exec` run skips hooks you haven't trusted; Astra review briefs carry what they need either way.
 - **Questions.** Codex's multiple-choice question tool is only available in Plan mode by default. To allow it in Default mode, enable the `default_mode_request_user_input` feature (`codex features`).
 
 ## Upgrading from 1.x
