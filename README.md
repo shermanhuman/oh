@@ -67,7 +67,12 @@ Codex reads a project's `.codex/config.toml` only once that project is trusted: 
 
 ### Codex notes
 
-- **The waxseal guard** checks what a command would run, not what it mentions: commit messages, PR bodies, `grep` patterns and heredocs written to documents pass, while heredocs fed to a shell or interpreter, `bash -c`/`ssh`/`eval` strings, `$(…)`, and script files about to run (`python3 x.py`, `bash x.sh`, `go run x.go`) are read first. It is a backstop for the rule, not a sandbox: a URL assembled at runtime, a script fetched and piped in, or code it can't parse gets through. It is off inside waxseal's and oh's own source trees.
+- **The waxseal guard** is deliberately narrow: it looks only at what a shell would execute. It refuses:
+  - `kubeseal`, whether run directly, through wrappers (`sudo`, `timeout`, `xargs`, `mise exec`, …), inside `bash -c`/`ssh`/`eval` strings and shell heredocs, in shell scripts about to run, or after `kubectl exec --`/`docker run`/`go run`
+  - every `gcloud secrets` verb except `list`, `describe`, `get-iam-policy`, `versions list|describe` and `locations`
+  - Secret Manager resource URLs (`…/v1/projects/…`) passed to curl or wget, directly or through a variable
+
+  It never inspects interpreter code (Python, Node, Go) or text inside quotes, so commit messages, PR bodies, `grep` patterns and documents always pass, and code using a Secret Manager client library gets through. The rule still forbids that code. The guard is off inside waxseal's and oh's own source trees, and it fails open, with a note on stderr, on input it can't handle.
 - **Hooks.** The `oh` and `compound-v` always-on rules arrive through session-start hooks. Codex skips plugin hooks, silently, until you trust them: open `/hooks` once and trust both (oh has two: the session-start rules and the waxseal guard). Trust is tied to the hook's contents, so after an oh update Codex asks again. The guard needs `python3`; if it's missing, the hook errors and the command goes ahead. A `codex exec` run skips hooks you haven't trusted; Astra review briefs carry what they need either way.
 - **Questions.** Codex's multiple-choice question tool is only available in Plan mode by default. To allow it in Default mode, enable the `default_mode_request_user_input` feature (`codex features`).
 
@@ -85,7 +90,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
-- oh 2.3.0: always-on *Sealed secrets go through waxseal* rule, plus a PreToolUse guard (`hooks/waxseal-guard.py`) that refuses `kubeseal`, `gcloud secrets` value access and direct Secret Manager API calls, except inside waxseal's own repository.
+- oh 2.3.0: always-on *Sealed secrets go through waxseal* rule, plus a narrow PreToolUse guard (`hooks/waxseal-guard.py`) that refuses `kubeseal`, `gcloud secrets` changes and value reads, and Secret Manager URLs given to curl/wget, except inside waxseal's and oh's own source trees.
 - oh 2.2.0: always-on *Watch your pull requests* rule, with the commands in `pull-requests`: keep your open PRs mergeable and green, re-bump when the base moves, check before calling anything ready.
 - oh 2.1.0: always-on *Questions* rule — the context for a multiple-choice question goes inside the question, one decision per question when the topic is unfamiliar, plain text when the user asks to clarify.
 - 2.0.0: Promptherder herd → six Claude Code and Codex plugins. Always-on rules move into the `oh` plugin's session-start hook; the review procedure moves to `compound-v:review-loop`, with `oh` naming the reviewers (Fable high, Astra high via `codex exec`); stack and API skills become per-repository plugins; the `promptherder` skill is gone.

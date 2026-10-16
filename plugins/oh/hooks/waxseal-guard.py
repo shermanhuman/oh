@@ -1,24 +1,27 @@
 """PreToolUse guard: sealed secrets go through the waxseal CLI only.
 
-Refuses shell commands that seal with kubeseal or touch Google Secret Manager
-outside waxseal: any `gcloud secrets` verb other than list/describe, any
-Secret Manager URL handed to curl/wget, and Secret Manager value calls in code
-run by an interpreter. Those side paths skip waxseal's metadata, and reading
-values puts plaintext in the session.
+A backstop for oh's always-on rule, deliberately narrow: it looks only at what
+a shell would execute, never at code or prose. It refuses:
 
-What counts is what would run, not what is mentioned: quoted text, commit
-messages, PR bodies, grep patterns and heredocs written to documents are data.
-Heredocs fed to a shell or an interpreter, `bash -c`/`ssh`/`eval` strings,
-command substitutions, and script files about to be run are checked.
+- `kubeseal`, run directly or through a wrapper (sudo, timeout, nice, env,
+  xargs, mise exec, ...), inside `bash -c`/`ssh`/`eval`/`watch` strings, a
+  heredoc fed to a shell, a shell script about to run, or named as the program
+  in `kubectl exec`/`docker run`/`go run`;
+- any `gcloud secrets` verb other than list, describe, get-iam-policy,
+  versions list|describe and locations;
+- a Secret Manager URL handed to curl/wget/http/xh, directly or through a
+  variable set in the same command.
+
+Interpreter code (Python, Node, Go ...) is not inspected, and neither is text
+inside quotes, so a script using a Secret Manager client library gets
+through: the rule still forbids it. Commit messages, PR bodies, grep patterns
+and documents written through heredocs are data and always pass.
 
 Reads the hook event on stdin (Claude Code and Codex send the same shape for
 the Bash tool) and prints a deny decision, or nothing to let the call through.
-Anything it can't parse is let through: a broken guard must not stop every
-command. It is a backstop for the always-on rule, not a sandbox; a URL built
-at runtime or a script fetched and piped in will get past it.
-
-Off inside waxseal's and oh's own source trees, whose code and tests use these
-tools and strings on purpose.
+It fails open, with a note on stderr, on anything unexpected: a broken guard
+must not stop every command. Off inside waxseal's and oh's own source trees,
+whose code and tests use these tools on purpose.
 """
 import json
 import os
@@ -28,7 +31,6 @@ import shlex
 import sys
 
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
-INTERPRETER = re.compile(r"(python[0-9.]*|node|nodejs|deno|bun|ruby|perl|php)")
 NETWORK = {"curl", "wget", "http", "https", "xh"}
 CONTAINERS = {"kubectl", "docker", "podman", "nerdctl"}
 LOOKUPS = {"which", "type", "whereis", "hash"}
@@ -45,28 +47,22 @@ RUNNERS = {
     "nohup": set(), "time": set(), "command": set(), "builtin": set(), "caffeinate": set(),
 }
 SSH_VALUE_OPTIONS = set("BbcDEeFIiJLlmOoPpQRSWw")
+OPERATORS = set("();<>|&\n")
 
-SECRET_API = re.compile(r"secretmanager\.googleapis\.com", re.I)
-SECRET_CALL = re.compile(r"(access|add|destroy)_?secret_?version", re.I)
-GCLOUD_IN_CODE = re.compile(r"gcloud\W+(?:\S+\W+)*?secrets\W+(versions\W+(access|add|destroy|disable|enable)|create|delete|update)\b")
+# Secret and version resources live under /v1/projects/...; the discovery document doesn't.
+SECRET_API = re.compile(r"secretmanager\.googleapis\.com/v\d\w*/projects/", re.I)
+SECRET_HOST = re.compile(r"secretmanager\.googleapis\.com", re.I)
+KUBESEAL_ARG = re.compile(r"(^|/)kubeseal($|[:@])|sealed-secrets-kubeseal")
+ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 GCLOUD_READS = (["list"], ["describe"], ["get-iam-policy"], ["versions", "list"], ["versions", "describe"], ["locations"])
-SCRIPT_SUFFIXES = {".sh", ".bash", ".zsh", ".py", ".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".php", ".go"}
+SHELL_SUFFIXES = {".sh", ".bash", ".zsh"}
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
-MAX_SCRIPT_BYTES = 1_000_000
+MAX_TEXT = 256_000
 DEPTH = 4
 
 KUBESEAL = "runs kubeseal"
 GCLOUD = "changes or reads Secret Manager with gcloud"
 API = "calls the Secret Manager API directly"
-
-
-def code_reason(code):
-    """Secret Manager use inside interpreter code, ignoring comment lines."""
-    lines = [line for line in code.splitlines() if not line.lstrip().startswith(("#", "//"))]
-    text = "\n".join(lines)
-    if GCLOUD_IN_CODE.search(text):
-        return GCLOUD
-    return API if SECRET_API.search(text) or SECRET_CALL.search(text) else None
 
 
 def split_heredocs(text):
@@ -88,16 +84,30 @@ def split_heredocs(text):
 
 
 def tokens(text):
-    """Simple commands as argv lists, split on unquoted operators and newlines."""
+    """Simple commands as argv lists: quotes removed, split on unquoted operators
+    and newlines, `#` comments dropped."""
     lexer = shlex.shlex(text, posix=True, punctuation_chars="();<>|&\n")
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     lexer.commenters = ""
-    found, current = [], []
+    found, current, comment, redirect = [], [], False, False
     for token in lexer:
-        if set(token) <= set("();<>|&\n"):
+        if set(token) <= OPERATORS:
+            if "\n" in token:
+                comment = redirect = False
+            elif comment:
+                continue
+            if set(token) <= set("<>&") and set(token) & set("<>"):
+                redirect = True  # the next word is a file name, not a command
+                continue
             found.append(current)
             current = []
+        elif comment:
+            continue
+        elif redirect:
+            redirect = False
+        elif token.startswith("#"):
+            comment = True
         else:
             current.append(token)
     found.append(current)
@@ -123,7 +133,7 @@ def program(argv):
     i = 0
     while i < len(argv):
         word = argv[i]
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", word):
+        if ASSIGNMENT.match(word):
             i += 1
         elif word == "command" and i + 1 < len(argv) and argv[i + 1] in ("-v", "-V"):
             return ["which"] + argv[i + 2:]
@@ -142,15 +152,20 @@ def program(argv):
     return argv[i:]
 
 
-def script_file(arg, cwd):
+def shell_script(arg, cwd):
+    """The path and text of a shell script about to run, if it is one."""
     path = pathlib.Path(arg)
     if not path.is_absolute():
         path = pathlib.Path(cwd) / path
     try:
-        if path.is_file() and path.stat().st_size <= MAX_SCRIPT_BYTES:
-            return path, path.read_text(encoding="utf-8", errors="ignore")
+        if not path.is_file() or path.stat().st_size > MAX_TEXT:
+            return None, None
+        text = path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
-        pass
+        return None, None
+    first = text.split("\n", 1)[0]
+    if path.suffix in SHELL_SUFFIXES or (first.startswith("#!") and re.search(r"\b(ba|z|da|k)?sh\b", first)):
+        return path, text
     return None, None
 
 
@@ -169,9 +184,13 @@ def argv_reason(argv, cwd, depth):
             if re.fullmatch(r"-[a-z]*c[a-z]*", flag) and i + 1 < len(args):
                 return reason_for(args[i + 1], cwd, depth + 1)
             if not flag.startswith("-"):
-                path, content = script_file(flag, cwd)
-                return reason_for(content, str(path.parent), depth + 1) if content else None
+                path, text = shell_script(flag, cwd)
+                return reason_for(text, str(path.parent), depth + 1) if text else None
         return None
+    if "/" in argv[0]:
+        path, text = shell_script(argv[0], cwd)
+        if text:
+            return reason_for(text, str(path.parent), depth + 1)
     if name == "eval":
         return reason_for(" ".join(args), cwd, depth + 1)
     if name == "ssh":
@@ -184,62 +203,37 @@ def argv_reason(argv, cwd, depth):
         while i < len(args) and args[i].startswith("-"):
             i += 2 if args[i] in ("-n", "--interval") else 1
         return reason_for(" ".join(args[i:]), cwd, depth + 1) if i < len(args) else None
-    if name in CONTAINERS:
-        if any(re.search(r"(^|/)kubeseal($|[:@])|sealed-secrets-kubeseal", arg) for arg in args):
+    if name in CONTAINERS or (name == "go" and args[:1] == ["run"]):
+        # kubectl's own arguments are resource names; only the command after -- runs.
+        if name != "kubectl" and any(KUBESEAL_ARG.search(arg) for arg in args):
             return KUBESEAL
-        return None
+        return argv_reason(args[args.index("--") + 1:], cwd, depth + 1) if "--" in args else None
     if name == "gcloud" and "secrets" in args:
-        rest = args[args.index("secrets") + 1:]
-        verbs = [word for word in rest if not word.startswith("-")]
-        if not any(verbs[:len(read)] == read for read in GCLOUD_READS):
-            return GCLOUD
-        return None
-    if name == "go" and args[:1] == ["run"]:
-        targets = [arg for arg in args[1:] if not arg.startswith("-")]
-        if any(re.search(r"(^|/)kubeseal($|@)", arg) for arg in targets):
-            return KUBESEAL
-        for arg in targets:
-            if arg.endswith(".go"):
-                _, content = script_file(arg, cwd)
-                if content and code_reason(content):
-                    return code_reason(content)
-        return None
+        verbs = [word for word in args[args.index("secrets") + 1:] if not word.startswith("-")]
+        return None if any(verbs[:len(read)] == read for read in GCLOUD_READS) else GCLOUD
     if name in NETWORK:
         return API if any(SECRET_API.search(arg) for arg in args) else None
-    if INTERPRETER.fullmatch(name):
-        for i, flag in enumerate(args):
-            if flag in ("-c", "-e", "--eval", "-p", "--print", "-r") and i + 1 < len(args):
-                return code_reason(args[i + 1])
-            if flag == "-m":
-                return None
-            if not flag.startswith("-"):
-                _, content = script_file(flag, cwd)
-                return code_reason(content) if content else None
     return None
 
 
 def heredoc_reason(header, body, cwd, depth):
+    """A heredoc counts only when a shell runs it or it becomes a shell script."""
     before = HEREDOC.split(header, maxsplit=1)[0]
     commands = simple_commands(re.sub(r"\d*>>?\s*\S+", " ", before)) or [[]]
     argv = program(commands[-1])
     name = os.path.basename(argv[0]) if argv else ""
     if name in SHELLS or name == "ssh":
         return reason_for(body, cwd, depth + 1)
-    if INTERPRETER.fullmatch(name):
-        return code_reason(body)
     if name in ("cat", "tee"):
         target = re.search(r">>?\s*(\S+)", header)
         written = target.group(1) if target else next((a for a in argv[1:] if not a.startswith("-")), "")
-        suffix = pathlib.Path(written.strip("'\"")).suffix
-        if suffix in (".sh", ".bash", ".zsh"):
+        if pathlib.Path(written.strip("'\"")).suffix in SHELL_SUFFIXES:
             return reason_for(body, cwd, depth + 1)
-        if suffix in SCRIPT_SUFFIXES:
-            return code_reason(body)
     return None
 
 
 def reason_for(text, cwd, depth=0):
-    if not text or depth > DEPTH:
+    if not text or depth > DEPTH or len(text) > MAX_TEXT:
         return None
     main, docs = split_heredocs(text)
     for header, body in docs:
@@ -247,37 +241,28 @@ def reason_for(text, cwd, depth=0):
         if why:
             return why
     commands = simple_commands(main)
-    # A Secret Manager URL kept in a variable and then fetched.
-    if any(SECRET_API.search(word) for argv in commands for word in argv if re.match(r"[A-Za-z_][A-Za-z0-9_]*=", word)):
-        if any(os.path.basename(program(argv)[0]) in NETWORK for argv in commands if program(argv)):
-            return API
+    # A Secret Manager URL kept in a variable, then fetched with it in the same command.
+    names = {word.split("=", 1)[0] for argv in commands for word in argv if ASSIGNMENT.match(word) and SECRET_HOST.search(word)}
+    for argv in map(program, commands):
+        if names and argv and os.path.basename(argv[0]) in NETWORK:
+            if any(f"${n}" in arg or f"${{{n}}}" in arg for n in names for arg in argv[1:]):
+                return API
     for argv in commands:
         why = argv_reason(argv, cwd, depth)
         if why:
             return why
-        for arg in argv:
-            for inner in re.findall(r"\$\(([^()]*)\)|`([^`]*)`", arg):
-                why = reason_for(inner[0] or inner[1], cwd, depth + 1)
-                if why:
-                    return why
     return None
 
 
 def exempt(cwd):
     """True inside waxseal's or oh's own source tree."""
-    try:
-        path = pathlib.Path(cwd).resolve()
-    except (OSError, RuntimeError, TypeError):
-        return False
+    path = pathlib.Path(cwd).resolve()
     for directory in (path, *path.parents):
         if (directory / "plugins/oh/hooks/waxseal-guard.py").is_file():
             return True
         go_mod = directory / "go.mod"
         if go_mod.is_file():
-            try:
-                lines = go_mod.read_text(encoding="utf-8", errors="ignore").splitlines()
-            except OSError:
-                return False
+            lines = go_mod.read_text(encoding="utf-8", errors="ignore").splitlines()
             return any(line.strip() == "module github.com/shermanhuman/waxseal" for line in lines)
     return False
 
@@ -289,34 +274,40 @@ def command_text(tool_input):
     return command if isinstance(command, str) else ""
 
 
-def main():
-    try:
-        event = json.load(sys.stdin)
-    except (ValueError, OSError):
-        return
+def decide(event):
     if not isinstance(event, dict):
-        return
-    cwd = event.get("cwd") or os.getcwd()
-    try:
-        why = reason_for(command_text(event.get("tool_input")), cwd)
-    except RecursionError:
-        return
-    if not why or exempt(cwd):
-        return
-    message = (
+        return None
+    cwd = event.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        cwd = os.getcwd()
+    if exempt(cwd):
+        return None
+    why = reason_for(command_text(event.get("tool_input")), cwd)
+    if not why:
+        return None
+    return (
         f"Blocked by oh: this command {why}. Sealed secrets go through the waxseal CLI only: "
         "`waxseal key add|set|edit`, `waxseal reseal`, `waxseal secret list|show|retire`, "
         "one visible command per call, values from --from-file, stdin or --generate. "
         "If waxseal can't do what you need, stop and ask the user; don't work around it. "
         "If gcloud needs a fresh login, ask the user to run `! gcloud auth login`."
     )
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": message,
-        }
-    }))
+
+
+def main():
+    try:
+        message = decide(json.load(sys.stdin))
+    except Exception as error:  # fail open, but say so
+        print(f"waxseal-guard: skipped ({type(error).__name__}: {error})", file=sys.stderr)
+        return
+    if message:
+        print(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": message,
+            }
+        }))
 
 
 if __name__ == "__main__":

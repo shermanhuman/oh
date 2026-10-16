@@ -3,89 +3,102 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 GUARD = pathlib.Path(__file__).resolve().parent.parent / "plugins/oh/hooks/waxseal-guard.py"
 OUTSIDE = tempfile.mkdtemp(prefix="guard-")
 
-# Commands that would seal or touch Secret Manager outside waxseal.
+# What a shell would execute: kubeseal, gcloud secrets changes or reads, Secret Manager URLs.
 DENIED = [
-    'gcloud secrets delete default-twenty-secrets-username --quiet',
-    'gcloud secrets versions destroy 3 --secret default-twenty-secrets-password',
-    'gcloud secrets versions disable 3 --secret foo',
-    'gcloud secrets update foo --update-labels=x=y',
-    'timeout 30 kubeseal --fetch-cert',
-    'sudo -u deploy kubeseal --version',
-    'nice -n 10 kubeseal --version',
-    "ssh vm 'kubeseal --fetch-cert > cert.pem'",
-    'kubectl exec -n kube-system deploy/sealed-secrets -- kubeseal --version',
-    'docker run --rm -i ghcr.io/bitnami-labs/sealed-secrets/kubeseal:latest --cert cert.pem < s.yaml',
-    'go run github.com/bitnami-labs/sealed-secrets/cmd/kubeseal@v0.27.1 --version',
-    "eval 'kubeseal --version'",
-    'curl -X POST -H "Authorization: Bearer $T" \'https://secretmanager.googleapis.com/v1/projects/p/secrets?secretId=foo\' -d \'{"replication":{"automatic":{}}}\'',
-    'curl -X POST -H "Authorization: Bearer $T" https://secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:destroy',
-    'BASE=https://secretmanager.googleapis.com/v1; curl -H "Authorization: Bearer $T" "$BASE/projects/p/secrets/s/versions/latest:access"',
-    "node - <<'EOF'\nconst [v] = await client.accessSecretVersion({name});\nEOF",
-    'python3 -c "import subprocess; print(subprocess.check_output([\'gcloud\',\'secrets\',\'versions\',\'access\',\'latest\',\'--secret\',\'foo\']))"',
-    'echo foo | xargs -I{} gcloud secrets versions access latest --secret {}',
-    'kubeseal --format yaml < secret.yaml > sealed.yaml',
-    'kubectl create secret generic x --dry-run=client -o yaml | kubeseal --cert cert.pem',
-    'FOO=1 sudo -E /usr/local/bin/kubeseal --version',
-    'mise exec -- kubeseal --fetch-cert',
-    'echo start; $(kubeseal --version)',
-    'echo "v=$(kubeseal --version)"',
+    "kubeseal --format yaml < secret.yaml > sealed.yaml",
+    "kubectl create secret generic x --dry-run=client -o yaml | kubeseal --cert cert.pem",
+    "FOO=1 sudo -E /usr/local/bin/kubeseal --version",
+    "sudo -u deploy kubeseal --version",
+    "timeout 30 kubeseal --fetch-cert",
+    "nice -n 10 kubeseal --version",
+    "mise exec -- kubeseal --fetch-cert",
+    "echo start; $(kubeseal --version)",
+    "cd x && kubeseal --version",
     "bash -c 'kubeseal --version'",
     "bash -lc 'cd /tmp; kubeseal --version'",
-    'cd x && kubeseal --version',
+    "eval 'kubeseal --version'",
+    "ssh vm 'kubeseal --fetch-cert > cert.pem'",
     "ssh vm <<'EOF'\nset -e\nkubeseal --fetch-cert > cert.pem\nEOF",
-    'gcloud secrets versions access latest --secret foo',
-    'gcloud --project p secrets versions add foo --data-file=-',
-    'mise exec -- gcloud secrets create foo --replication-policy automatic',
+    "cat > seal.sh <<'EOF'\nset -e\nkubeseal --fetch-cert\nEOF",
+    "kubectl exec -n kube-system deploy/sealed-secrets -- kubeseal --version",
+    "kubectl exec -it pod -- sh -c 'kubeseal --version'",
+    "docker run --rm -i ghcr.io/bitnami-labs/sealed-secrets/kubeseal:latest --cert cert.pem < s.yaml",
+    "go run github.com/bitnami-labs/sealed-secrets/cmd/kubeseal@v0.27.1 --version",
+    "gcloud secrets versions access latest --secret foo",
+    "PASS=$(gcloud secrets versions access latest --secret foo)",
+    "gcloud --project p secrets versions add foo --data-file=-",
+    "gcloud --verbosity=debug secrets versions access latest --secret foo",
+    "gcloud alpha secrets versions access latest --secret foo",
+    "mise exec -- gcloud secrets create foo --replication-policy automatic",
+    "gcloud secrets delete foo --quiet",
+    "gcloud secrets update foo --update-labels=x=y",
+    "gcloud secrets versions destroy 3 --secret foo",
+    "gcloud secrets versions disable 3 --secret foo",
+    "gcloud secrets add-iam-policy-binding foo --member=serviceAccount:x --role=roles/secretmanager.secretAccessor",
+    "echo foo | xargs -I{} gcloud secrets versions access latest --secret {}",
     'curl -fsS -H "Authorization: Bearer $T" "https://secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:access"',
-    "python3 - <<'PY'\nfrom google.cloud import secretmanager\nc.access_secret_version(name=n)\nPY",
-    "cat > seal.sh <<'EOF'\nset -e\ncurl -s https://secretmanager.googleapis.com/v1/x:access\nEOF",
-    "cat > /tmp/m.go <<'EOF'\nresp, err := client.AccessSecretVersion(ctx, req)\nEOF",
+    "curl -X POST https://secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:destroy",
+    "BASE=https://secretmanager.googleapis.com/v1; curl -H \"Authorization: Bearer $T\" \"$BASE/projects/p/secrets/s/versions/latest:access\"",
 ]
 
 # Everyday commands that only mention these tools, or read metadata.
 ALLOWED = [
-    'command -v kubeseal',
-    'which kubeseal',
-    'git commit -m "$(cat <<\'EOF\'\nchore: drop kubeseal\n\nkubeseal is no longer installed on the runner.\nEOF\n)"',
-    'gh pr create --title x --body "$(cat <<\'EOF\'\n## Changes\n- kubeseal removed from the rehearsal script\nEOF\n)"',
-    "git commit -m 'guard: deny access_secret_version too'",
-    'grep -rn access_secret_version plugins/ tests/',
+    "waxseal --repo . --no-input --yes key add ns-app API_KEY --from-file -",
+    "waxseal reseal default-app",
+    "waxseal check metadata && waxseal check gsm",
+    "openssl rand -base64 32 | waxseal key set default-app key --from-file -",
+    "command -v kubeseal",
+    "which kubeseal",
+    "mise which kubeseal",
+    "brew info kubeseal",
+    "kubectl get sealedsecret -A",
+    "kubectl -n kubeseal get pods",
+    "kubectl -n kube-system logs deploy/sealed-secrets | grep -i kubeseal",
+    "gcloud secrets list --project p --format json",
+    "gcloud secrets describe foo",
+    "gcloud secrets versions list foo",
+    "gcloud secrets get-iam-policy foo",
+    "gcloud auth login",
+    "gcloud compute ssh vm --zone z --command 'uptime'",
+    "curl -s 'https://secretmanager.googleapis.com/$discovery/rest?version=v1' | jq .revision",
+    "DOCS=https://secretmanager.googleapis.com/; curl -s https://example.com/health",
+    "grep -rn kubeseal docs/",
+    "grep -rn access_secret_version plugins/ tests/",
     "rg 'secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:access' docs/",
-    "cat > docs/secrets.md <<'EOF'\n# Don't\n\ngcloud secrets versions access latest --secret foo\nEOF",
-    "cat > .claude/rules/sealed-secrets.md <<'EOF'\n- Never wrap waxseal in a generated script, seal with `kubeseal`, or read GSM another way.\nEOF",
-    'echo \'{"tool_name":"Bash","tool_input":{"command":"kubeseal --version"},"cwd":"/tmp"}\' | python3 -I plugins/oh/hooks/waxseal-guard.py',
-    'echo \'{"tool_input":{"command":"curl https://secretmanager.googleapis.com/v1/p:access"}}\' | python3 -I plugins/oh/hooks/waxseal-guard.py',
-    'mise exec -- gh pr comment 15 -R shermanhuman/oh --body-file /tmp/r.md',
-    'mise exec -- kubectl get sealedsecret -n default default-twenty-secrets -o yaml',
-    'gcloud secrets list --project waxseal-infra-secrets --format json',
-    'gcloud secrets versions list default-twenty-secrets-password',
-    'gcloud secrets get-iam-policy foo',
-    'gcloud auth login',
-    "printf 'twenty' | waxseal --no-input --yes key add default-twenty-secrets username --from-file - --rotation static",
-    'waxseal check metadata && waxseal check gsm',
-    'waxseal --dry-run key add default-twenty-secrets username --from-file - --rotation static --no-input',
-    'openssl rand -base64 32 | waxseal key set default-breakdown-admin-secrets sites_service_key --from-file -',
-    'cd /Users/s/github/_release/oh-waxseal && python3 -m unittest discover -s tests -v',
-    'git log --all --oneline --grep=kubeseal',
+    "git log --all --oneline --grep=kubeseal",
     "sed -i '' 's/kubeseal/waxseal/g' README.md",
-    'mise which kubeseal',
-    'brew info kubeseal',
-    'cat local-e2e/kata-rehearsal/18-components.sh',
-    'bash local-e2e/kata-rehearsal/18-components.sh',
-    'terraform plan',
-    'echo "it\'s fine; kubeseal is only mentioned',
-    "python3 - <<'PY'\n# we never call access_secret_version here\nprint(1)\nPY",
-    'echo done',
-    'waxseal reseal default-app',
-    'kubectl get sealedsecret -A',
+    "echo 'kubeseal is not used here'",
+    "echo \"it's fine; kubeseal is only mentioned",
     "git commit -m 'fix; kubeseal is gone, use waxseal'",
+    "git commit -m 'docs: drop the `kubeseal` recipe'",
+    "git commit -m 'guard: deny access_secret_version too'",
+    "git commit -m \"$(cat <<'EOF'\nchore: drop kubeseal\n\nkubeseal is no longer installed.\nEOF\n)\"",
+    "gh pr create --title x --body \"$(cat <<'EOF'\n## Changes\n- kubeseal removed\nEOF\n)\"",
+    "gh pr comment 15 --body 'Fixed: `kubeseal` wrappers are denied now'",
     "gh pr create --title 'no kubeseal' --body-file body.md",
-    'gcloud secrets describe foo',
+    "cat > docs/secrets.md <<'EOF'\n# Don't\n\ngcloud secrets versions access latest --secret foo\nEOF",
+    "bash <<'EOF'\n# old: kubectl ... | kubeseal > x\necho ok\nEOF",
+    "ssh root@vm 'bash -s prep' < local-e2e/kata-rehearsal/18-components.sh",
+    "scp local-e2e/kata-rehearsal/18-components.sh root@vm:/root/",
+    "MIX_ENV=test mix test test/foo_test.exs:12",
+    "go test ./... -run TestSeal -count=1",
+    "python3 -m pytest tests/ -k secret",
+    "node -e 'console.log(1 << 3)'",
+]
+
+# Outside the guard's scope by design (the always-on rule still forbids them):
+# interpreter code, and text inside double quotes.
+NOT_COVERED = [
+    "python3 - <<'PY'\nfrom google.cloud import secretmanager\nc.access_secret_version(name=n)\nPY",
+    "node - <<'EOF'\nconst [v] = await client.accessSecretVersion({name});\nEOF",
+    "python3 -c \"import subprocess; subprocess.run(['gcloud','secrets','versions','access','latest'])\"",
+    "echo \"v=`kubeseal --version`\"",
 ]
 
 
@@ -114,25 +127,52 @@ class Guard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIsNone(run(command))
 
+    def test_scope_stays_narrow(self):
+        for command in NOT_COVERED:
+            with self.subTest(command=command):
+                self.assertIsNone(run(command))
+
     def test_codex_list_command(self):
         event = {"tool_name": "Bash", "tool_input": {"command": ["bash", "-lc", "kubeseal --version"]}, "cwd": OUTSIDE}
         self.assertEqual(run(None, raw=json.dumps(event))["permissionDecision"], "deny")
 
-    def test_script_files_are_read_before_they_run(self):
+    def test_shell_scripts_are_read_before_they_run(self):
         with tempfile.TemporaryDirectory() as d:
             root = pathlib.Path(d)
-            (root / "read.py").write_text("from google.cloud import secretmanager\nc.access_secret_version(name=n)\n")
-            (root / "m.go").write_text("resp, err := client.AccessSecretVersion(ctx, req)\n")
             (root / "seal.sh").write_text("#!/bin/sh\nkubeseal --format yaml < s.yaml\n")
+            (root / "seal").write_text("#!/usr/bin/env bash\nset -e\nkubeseal --fetch-cert\n")
             (root / "ok.sh").write_text("#!/bin/sh\nwaxseal reseal default-app\n")
-            for command in ["python3 read.py", "go run m.go", "bash seal.sh", "sh ./seal.sh"]:
+            (root / "comment.sh").write_text("#!/bin/sh\n# usage: kubectl create secret x -o yaml | kubeseal > s.yaml\n#   1) kubeseal --fetch-cert\necho ok\n")
+            (root / "read.py").write_text("c.access_secret_version(name=n)\n")
+            for command in ["bash seal.sh", "sh ./seal.sh", "./seal.sh", "./seal"]:
                 with self.subTest(command=command):
                     self.assertIsNotNone(run(command, cwd=d))
-            self.assertIsNone(run("bash ok.sh", cwd=d))
+            for command in ["bash ok.sh", "bash comment.sh", "python3 read.py", "cat seal.sh"]:
+                with self.subTest(command=command):
+                    self.assertIsNone(run(command, cwd=d))
 
-    def test_unparseable_input_passes(self):
+    def test_fast_on_large_input(self):
+        commands = [
+            "cat > notes.md <<'EOF'\n" + "- kubeseal removed; see `gcloud secrets` ban\n" * 5000 + "EOF\n",
+            "python3 -c \"s = 'gcloud " + "-" * 40 + "'\"",
+            "echo " + "word " * 40000 + "\"unterminated",
+        ]
+        for command in commands:
+            start = time.monotonic()
+            self.assertIsNone(run(command))
+            self.assertLess(time.monotonic() - start, 5)
+
+    def test_bad_input_passes(self):
         self.assertIsNone(run(None, raw="not json"))
-        self.assertIsNone(run(None, raw=json.dumps({"tool_name": "Write", "tool_input": {"file_path": "x"}})))
+        for event in [
+            {"tool_name": "Write", "tool_input": {"file_path": "x"}},
+            {"tool_name": "Bash", "tool_input": {"command": "kubeseal"}, "cwd": 123},
+            {"tool_name": "Bash", "tool_input": ["kubeseal"], "cwd": OUTSIDE},
+            {"tool_name": "Bash", "tool_input": {"command": {"a": 1}}, "cwd": OUTSIDE},
+        ]:
+            with self.subTest(event=event):
+                result = subprocess.run([sys.executable, "-I", str(GUARD)], input=json.dumps(event), capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0)
 
     def test_source_trees_are_exempt(self):
         with tempfile.TemporaryDirectory() as d:
