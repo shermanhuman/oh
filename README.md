@@ -72,7 +72,7 @@ The `oh-*` plugins are installed once at user scope, switched off in user settin
 
 ## Upgrading from 1.x
 
-1.x was a [Promptherder](https://github.com/shermanhuman/promptherder) herd; follow [Compound V's upgrade notes](https://github.com/shermanhuman/compound-v/blob/main/docs/upgrading-from-1x.md) in each repository that pulled it.
+1.x was a [Promptherder](https://github.com/shermanhuman/promptherder) herd. In each repository that pulled it, follow [Compound V's upgrade notes](https://github.com/shermanhuman/compound-v/blob/main/docs/upgrading-from-1x.md) with the `oh` herd in place of `compound-v`: remove `.promptherder/herds/oh` (and its `lock.json` entry) before the re-sync, and in the final check also look for the old copies of oh's skills (`mise`, `pull-requests`, `release`, `waxseal`, `dockerfile`, `phoenix`, `daisyui`, `tekmetric-api`, `telnyx-call-control`, `postmark-api`, `groq-api`, `promptherder`) under `.claude/skills/` and `.agents/skills/`. Then install the plugins as above and switch the stack and API plugins on per repository.
 
 ## License
 
