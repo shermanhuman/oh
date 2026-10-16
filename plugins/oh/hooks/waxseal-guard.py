@@ -47,7 +47,7 @@ RUNNERS = {
     "xargs": {"-I", "-n", "-P", "-L", "-d", "-s", "-E", "-a"},
     "stdbuf": {"-i", "-o", "-e"},
     "exec": {"-a"},
-    "nohup": set(), "time": set(), "command": set(), "builtin": set(), "caffeinate": set(),
+    "nohup": set(), "time": set(), "command": set(), "builtin": set(), "caffeinate": {"-t", "-w"},
 }
 SSH_VALUE_OPTIONS = set("BbcDEeFIiJLlmOoPpQRSWw")
 
@@ -270,7 +270,9 @@ def argv_reason(argv, cwd, depth):
         for i, flag in enumerate(args):
             if re.fullmatch(r"-[a-z]*c[a-z]*", flag) and i + 1 < len(args):
                 return reason_for(args[i + 1], cwd, depth + 1)
-            if not flag.startswith("-"):
+            if i > 0 and re.fullmatch(r"[-+][a-zA-Z]*[oO]", args[i - 1]):
+                continue
+            if not flag.startswith(("-", "+")):
                 path, text = shell_script(flag, cwd)
                 return reason_for(text, str(path.parent), depth + 1) if text else None
         return None
@@ -310,7 +312,11 @@ def heredoc_reason(header, body, cwd, depth):
     commands = simple_commands(re.sub(r"\d*>>?\s*\S+", " ", before))[0] or [[]]
     argv = program(commands[-1])
     name = os.path.basename(argv[0]) if argv else ""
-    if name in SHELLS or name == "ssh":
+    # `bash <<EOF`, or the heredoc piped on into a shell: `cat <<EOF | bash`, `| ssh vm bash`.
+    later = simple_commands(re.sub(r"\d*>>?\s*\S+", " ", HEREDOC.sub(" ", header)))[0]
+    if name in SHELLS or name == "ssh" or any(
+        program(c) and os.path.basename(program(c)[0]) in SHELLS | {"ssh"} for c in later
+    ):
         return reason_for(body, cwd, depth + 1)
     if name in ("cat", "tee"):
         target = re.search(r">>?\s*(\S+)", header)
