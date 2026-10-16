@@ -11,78 +11,67 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 
 | Plugin | What it holds | Where it's on |
 |---|---|---|
-| `oh` | Always-on: mise first, pull requests are releases, version bump per PR, questions with their context inside, watching your own PRs, sealed secrets only through waxseal (a PreToolUse guard refuses `kubeseal` and direct Secret Manager access), reviewer choices (Fable high reviewers; Astra high through `codex exec` as the second voice). Skills: `pull-requests`, `release`, `mise`, `waxseal`, `dockerfile` | everywhere |
+| `oh` | The always-on working agreements below, and the skills `pull-requests` (the release procedure behind them), `release`, `mise`, `waxseal` and `dockerfile` | everywhere |
 | `oh-phoenix` | `phoenix` (LiveView, Ecto, migrations, architecture and testing references), `daisyui` | Elixir repositories |
 | `oh-tekmetric` | `tekmetric-api` with the full endpoint catalog | repositories that sync Tekmetric |
 | `oh-telnyx` | `telnyx-call-control` | voice/SMS repositories |
 | `oh-postmark` | `postmark-api` | repositories that send email |
 | `oh-groq` | `groq-api` (Whisper transcription) | repositories that transcribe |
 
+## How I work on top of Compound V
+
+Compound V's [workflow](https://github.com/shermanhuman/compound-v#the-workflow) is the frame: pick, plan, review the plan, interrogate, build in a worktree, run the review loop, merge, file follow-ups. Oh adds my choices and the reasons for them:
+
+- **Mise first.** Every tool comes from mise, and runs through `mise exec` when the shell isn't activated, so nothing gets installed twice in different ways.
+- **A pull request is a release.** I keep one open PR per repository, batch the work, and test it locally before it opens. PRs stay drafts until the last review round is clean, and I merge.
+- **Worktrees, always.** My main checkouts run dev servers and sometimes hold another session's branch.
+- **Watch your own PRs.** After every push, the agent watches CI and mergeability, because I kept being the one who found the red check or the conflict.
+- **A version bump in every PR, done last.** It's re-applied when the base moves, because two PRs that set the same version line merge cleanly and then fail CI.
+- **Sealed secrets only through waxseal**, one visible command per call, with a guard hook that refuses `kubeseal`, `gcloud secrets` changes and Secret Manager URLs (details in the `oh:waxseal` skill and the hook text).
+- **Questions carry their own context**, because text above a question widget goes unread.
+- **Reviewers:** Fable at high effort for review subagents, and Astra high through `codex exec` as the second voice.
+
 ## Install
 
-The plugins are listed in the Compound V marketplace (this repository has none of its own, so nothing gets installed twice).
+The plugins are listed in the Compound V marketplace (this repository has none of its own, so nothing gets installed twice). `oh` builds on Compound V, so install that too.
 
-`oh` builds on Compound V (its review loop and plan format), so install that too.
+Claude Code:
 
-```text
-# Claude Code
-/plugin marketplace add shermanhuman/compound-v
-/plugin install compound-v@compound-v
-/plugin install oh@compound-v
-/plugin install oh-phoenix@compound-v      # and the other oh-* plugins
+```bash
+claude plugin marketplace add shermanhuman/compound-v
+claude plugin install compound-v@compound-v
+claude plugin install oh@compound-v
+claude plugin install oh-phoenix@compound-v
+```
 
-# Codex
+Codex:
+
+```bash
 codex plugin marketplace add shermanhuman/compound-v
 codex plugin add compound-v@compound-v
 codex plugin add oh@compound-v
-codex plugin add oh-phoenix@compound-v     # and the other oh-* plugins
+codex plugin add oh-phoenix@compound-v
 ```
 
-### Stack and API plugins per repository
+Install the other `oh-*` plugins the same way. Then, in Codex, open `/hooks` and trust oh's two hooks (the session-start rules and the waxseal guard) and Compound V's. Updating works as in [Compound V's README](https://github.com/shermanhuman/compound-v#updating): in Claude Code, auto-update or `claude plugin update oh@compound-v`; in Codex, `codex plugin add oh@compound-v`.
 
-Install them all once, switch them off for your user, and switch them on in each repository that needs them.
+## Stack and API plugins per repository
 
-**Claude Code** — in `~/.claude/settings.json`:
+The `oh-*` plugins are installed once at user scope, switched off in user settings and switched on in each repository that needs them, as [Compound V describes](https://github.com/shermanhuman/compound-v#switching-a-plugin-on-per-repository). Codex reads a repository's `.codex/config.toml` only once that project path is trusted: trust each main checkout once, and its worktrees follow.
 
-```json
-{ "enabledPlugins": { "oh-phoenix@compound-v": false, "oh-tekmetric@compound-v": false } }
-```
+## Gotchas
 
-and in the repository's committed `.claude/settings.json`:
-
-```json
-{ "enabledPlugins": { "oh-phoenix@compound-v": true, "oh-tekmetric@compound-v": true } }
-```
-
-Project settings override user settings, and git worktrees of the repository pick them up too.
-
-**Codex** — set `enabled = false` under `[plugins."oh-phoenix@compound-v"]` in `~/.codex/config.toml`, and commit a `.codex/config.toml` in the repository:
-
-```toml
-[plugins."oh-phoenix@compound-v"]
-enabled = true
-```
-
-Codex reads a project's `.codex/config.toml` only once that project is trusted: trust each repository's main checkout once (a trusted parent folder doesn't count) and its worktrees follow.
-
-### Codex notes
-
-- **The waxseal guard** is deliberately narrow: it looks only at what a shell would execute. It refuses:
-  - `kubeseal`, whether run directly, through wrappers (`sudo`, `timeout`, `xargs`, `mise exec`, …), inside `bash -c`/`ssh`/`eval` strings and shell heredocs, in shell scripts about to run, or after `kubectl exec --`/`docker run`/`go run`
-  - every `gcloud secrets` verb except `list`, `describe`, `get-iam-policy`, `versions list|describe` and `locations`
-  - Secret Manager resource URLs (`…/v1/projects/…`) passed to curl or wget, directly or through a variable
-
-  It never inspects interpreter code (Python, Node, Go) or text inside quotes, so commit messages, PR bodies, `grep` patterns and documents always pass, and code using a Secret Manager client library gets through. The rule still forbids that code. The guard is off inside waxseal's and oh's own source trees, and it fails open, with a note on stderr, on input it can't handle.
-- **Hooks.** The `oh` and `compound-v` always-on rules arrive through session-start hooks. Codex skips plugin hooks, silently, until you trust them: open `/hooks` once and trust both (oh has two: the session-start rules and the waxseal guard). Trust is tied to the hook's contents, so after an oh update Codex asks again. The guard needs `python3`; if it's missing, the hook errors and the command goes ahead. A `codex exec` run skips hooks you haven't trusted; Astra review briefs carry what they need either way.
-- **Questions.** Codex's multiple-choice question tool is only available in Plan mode by default. To allow it in Default mode, enable the `default_mode_request_user_input` feature (`codex features`).
+- **Astra can't post.** It runs `codex exec -s read-only`, so it can't post comments or call MCP tools. Post its report yourself, unchanged, under an "Astra high (Codex)" header.
+- **`codex exec` skips hooks you haven't trusted**, and Astra runs don't use `--dangerously-bypass-hook-trust`, so review briefs carry the rules they need.
+- **Codex's question tool works in Plan mode only by default.** To allow it in Default mode, enable the `default_mode_request_user_input` feature (`codex features`).
+- **The waxseal guard is a backstop, not a sandbox.** It checks only what a shell would execute, fails open on input it can't handle, and needs `python3`.
+- **After `codex plugin add oh-<name>@compound-v`**, that plugin's `enabled = true` comes back in `~/.codex/config.toml`. Switch it off again for your user.
+- **Cloud sessions load no plugins**, so each repository's `AGENTS.md` repeats the rules that must always hold: I merge, a PR is a release, every PR bumps the version.
+- **Run `gh pr checks --watch` from a directory without an untrusted `mise.toml`**, or mise refuses to start and the watch fails.
 
 ## Upgrading from 1.x
 
-1.x was a [Promptherder](https://github.com/shermanhuman/promptherder) herd. In each repository that pulled it: remove `oh` from `.promptherder/` (the herd and its `lock.json` entry), delete the generated output it produced (`AGENTS.md`/`CLAUDE.md` sections, `.claude/skills/`, `.agents/skills/` copies of `mise`, `pull-requests`, `release`, `phoenix` and the rest) while keeping any hand-written instructions, then install the plugins as above and switch the stack and API plugins on per repository.
-
-## Updating
-
-Installed copies change when a plugin's version does: every PR here bumps each plugin it changes. In Claude Code, turn on auto-update for the marketplace in `/plugin`, or run `claude plugin update oh@compound-v`; in Codex, run `codex plugin marketplace upgrade compound-v`.
+1.x was a [Promptherder](https://github.com/shermanhuman/promptherder) herd; follow [Compound V's upgrade notes](https://github.com/shermanhuman/compound-v/blob/main/docs/upgrading-from-1x.md) in each repository that pulled it.
 
 ## License
 
@@ -90,10 +79,8 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.3.1: `pull-requests` follows the review loop's tiers (light for prose, full with the instructions pass for agent-instruction files); README rewritten around how I work, with gotchas.
 - oh 2.3.0: always-on *Sealed secrets go through waxseal* rule, plus a narrow PreToolUse guard (`hooks/waxseal-guard.py`) that refuses `kubeseal`, `gcloud secrets` changes and value reads, and Secret Manager URLs given to curl/wget, except inside waxseal's and oh's own source trees.
 - oh 2.2.0: always-on *Watch your pull requests* rule, with the commands in `pull-requests`: keep your open PRs mergeable and green, re-bump when the base moves, check before calling anything ready.
 - oh 2.1.0: always-on *Questions* rule — the context for a multiple-choice question goes inside the question, one decision per question when the topic is unfamiliar, plain text when the user asks to clarify.
 - 2.0.0: Promptherder herd → six Claude Code and Codex plugins. Always-on rules move into the `oh` plugin's session-start hook; the review procedure moves to `compound-v:review-loop`, with `oh` naming the reviewers (Fable high, Astra high via `codex exec`); stack and API skills become per-repository plugins; the `promptherder` skill is gone.
-- 1.3.0: the always-on PR rule keeps only the policy; the procedure moved to the `pull-requests` skill. Review rounds loop only on must-fix findings.
-- 1.2.0: PRs are releases (worktree, local tests and e2e, review until clean, reviews on the PR); digest-pinned migrations in the release skill.
-- 1.0.0: version preparation separated from publishing; larger guides moved to `references/`.
