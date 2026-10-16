@@ -11,4 +11,6 @@ Confirm the installed version first: `waxseal --version`. This guide describes *
 
 Every command can be driven entirely by flags. On a terminal, waxseal prompts for whatever is left out; with `--no-input` (or in CI) it fails instead, naming the missing flag. Secret values are never taken from the command line: use `--from-file PATH`, `--from-file -` for stdin, or `--generate`.
 
+Every change goes through waxseal, one visible command per call: no wrapper scripts, no `kubeseal`, no hand-edited `encryptedData`, and no reading or writing Secret Manager outside waxseal (oh's guard hook refuses those). When waxseal has no command for the job, such as reusing a value already stored for another secret, stop and ask the user; that's a waxseal gap to file on shermanhuman/waxseal, not something to script around.
+
 Preserve the user's requested scope: resealing or checking does not authorize rotating or retiring; adding one key does not authorize touching others. `-y` accepts confirmations, it does not grant authorization. Never print, log or echo a secret value, including in error reports.

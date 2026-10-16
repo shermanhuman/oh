@@ -11,7 +11,7 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 
 | Plugin | What it holds | Where it's on |
 |---|---|---|
-| `oh` | Always-on: mise first, pull requests are releases, version bump per PR, questions with their context inside, watching your own PRs, reviewer choices (Fable high reviewers; Astra high through `codex exec` as the second voice). Skills: `pull-requests`, `release`, `mise`, `waxseal`, `dockerfile` | everywhere |
+| `oh` | Always-on: mise first, pull requests are releases, version bump per PR, questions with their context inside, watching your own PRs, sealed secrets only through waxseal (a PreToolUse guard refuses `kubeseal` and direct Secret Manager access), reviewer choices (Fable high reviewers; Astra high through `codex exec` as the second voice). Skills: `pull-requests`, `release`, `mise`, `waxseal`, `dockerfile` | everywhere |
 | `oh-phoenix` | `phoenix` (LiveView, Ecto, migrations, architecture and testing references), `daisyui` | Elixir repositories |
 | `oh-tekmetric` | `tekmetric-api` with the full endpoint catalog | repositories that sync Tekmetric |
 | `oh-telnyx` | `telnyx-call-control` | voice/SMS repositories |
@@ -67,7 +67,7 @@ Codex reads a project's `.codex/config.toml` only once that project is trusted: 
 
 ### Codex notes
 
-- **Hooks.** The `oh` and `compound-v` always-on rules arrive through session-start hooks. Codex skips plugin hooks, silently, until you trust them: open `/hooks` once and trust both. A `codex exec` run skips hooks you haven't trusted; Astra review briefs carry what they need either way.
+- **Hooks.** The `oh` and `compound-v` always-on rules arrive through session-start hooks. Codex skips plugin hooks, silently, until you trust them: open `/hooks` once and trust both (oh has two: the session-start rules and the waxseal guard). The guard needs `python3`; if it's missing, the hook errors and the command goes ahead. A `codex exec` run skips hooks you haven't trusted; Astra review briefs carry what they need either way.
 - **Questions.** Codex's multiple-choice question tool is only available in Plan mode by default. To allow it in Default mode, enable the `default_mode_request_user_input` feature (`codex features`).
 
 ## Upgrading from 1.x
@@ -84,6 +84,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.3.0: always-on *Sealed secrets go through waxseal* rule, plus a PreToolUse guard (`hooks/waxseal-guard.py`) that refuses `kubeseal`, `gcloud secrets` value access and direct Secret Manager API calls, except inside waxseal's own repository.
 - oh 2.2.0: always-on *Watch your pull requests* rule, with the commands in `pull-requests`: keep your open PRs mergeable and green, re-bump when the base moves, check before calling anything ready.
 - oh 2.1.0: always-on *Questions* rule — the context for a multiple-choice question goes inside the question, one decision per question when the topic is unfamiliar, plain text when the user asks to clarify.
 - 2.0.0: Promptherder herd → six Claude Code and Codex plugins. Always-on rules move into the `oh` plugin's session-start hook; the review procedure moves to `compound-v:review-loop`, with `oh` naming the reviewers (Fable high, Astra high via `codex exec`); stack and API skills become per-repository plugins; the `promptherder` skill is gone.
