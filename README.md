@@ -23,13 +23,14 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 Compound V's [workflow](https://github.com/shermanhuman/compound-v#the-workflow) is the frame: pick, plan, review the plan, interrogate, build in a worktree, run the review loop, merge, file follow-ups. Oh adds my choices and the reasons for them:
 
 - **Mise first.** Every tool comes from mise, and runs through `mise exec` when the shell isn't activated, so nothing gets installed twice in different ways.
-- **A pull request is a release.** I keep one open PR per repository, batch the work, and test it locally before it opens. PRs stay drafts until the last review round is clean, and I merge.
+- **A pull request is a release.** I keep one open PR per repository, batch the work, and test it locally before it opens. I merge. In my plugin repositories, PRs stay drafts until the last review round is clean (their `AGENTS.md` says so).
 - **Worktrees, always.** My main checkouts run dev servers and sometimes hold another session's branch.
 - **Watch your own PRs.** After every push, the agent watches CI and mergeability, because I kept being the one who found the red check or the conflict.
 - **A version bump in every PR, done last.** It's re-applied when the base moves, because two PRs that set the same version line merge cleanly and then fail CI.
-- **Sealed secrets only through waxseal**, one visible command per call, with a guard hook that refuses `kubeseal`, `gcloud secrets` changes and Secret Manager URLs (details in the `oh:waxseal` skill and the hook text).
+- **Sealed secrets only through waxseal**, one visible command per call, with a guard hook that refuses `kubeseal`, `gcloud secrets` changes and value reads, and Secret Manager URLs (details in the `oh:waxseal` skill and the hook text).
 - **Questions carry their own context**, because text above a question widget goes unread.
 - **Reviewers:** Fable at high effort for review subagents, and Astra high through `codex exec` as the second voice.
+- **`/next` without the prefix.** A one-line personal skill at `~/.claude/skills/next/SKILL.md` ("Use the `compound-v:next` skill with: $ARGUMENTS") lets me type `/next` instead of `/compound-v:next` in Claude Code. A plugin can't add a bare command, so it lives only on my machine; in Codex it's still `$compound-v:next`.
 
 ## Install
 
@@ -53,7 +54,7 @@ codex plugin add oh@compound-v
 codex plugin add oh-phoenix@compound-v
 ```
 
-Install the other `oh-*` plugins the same way. Then, in Codex, open `/hooks` and trust oh's two hooks (the session-start rules and the waxseal guard) and Compound V's. Updating works as in [Compound V's README](https://github.com/shermanhuman/compound-v#updating): in Claude Code, auto-update or `claude plugin update oh@compound-v`; in Codex, `codex plugin add oh@compound-v`.
+Install the other `oh-*` plugins the same way. Start a new Claude Code session (or run `/reload-plugins`). In Codex, open `/hooks` and trust oh's two hooks (the session-start rules and the waxseal guard) and Compound V's. Updating works as in [Compound V's README](https://github.com/shermanhuman/compound-v#updating): in Claude Code, auto-update or `claude plugin update oh@compound-v`; in Codex, `codex plugin add oh@compound-v`.
 
 ## Stack and API plugins per repository
 
@@ -63,11 +64,11 @@ The `oh-*` plugins are installed once at user scope, switched off in user settin
 
 - **Astra can't post.** It runs `codex exec -s read-only`, so it can't post comments or call MCP tools. Post its report yourself, unchanged, under an "Astra high (Codex)" header.
 - **`codex exec` skips hooks you haven't trusted**, and Astra runs don't use `--dangerously-bypass-hook-trust`, so review briefs carry the rules they need.
-- **Codex's question tool works in Plan mode only by default.** To allow it in Default mode, enable the `default_mode_request_user_input` feature (`codex features`).
+- **Codex's question tool works in Plan mode only by default.** To allow it in Default mode, run `codex features enable default_mode_request_user_input` (still marked under development in Codex 0.162.1).
 - **The waxseal guard is a backstop, not a sandbox.** It checks only what a shell would execute, fails open on input it can't handle, and needs `python3`.
 - **After `codex plugin add oh-<name>@compound-v`**, that plugin's `enabled = true` comes back in `~/.codex/config.toml`. Switch it off again for your user.
 - **Cloud sessions load no plugins**, so each repository's `AGENTS.md` repeats the rules that must always hold: I merge, a PR is a release, every PR bumps the version.
-- **Run `gh pr checks --watch` from a directory without an untrusted `mise.toml`**, or mise refuses to start and the watch fails.
+- **Any `mise exec` in a worktree with an untrusted `mise.toml` fails**, including `mise exec -- gh pr checks --watch`. Run `mise trust <worktree>/mise.toml` first, or run it from a directory without one.
 
 ## Upgrading from 1.x
 
