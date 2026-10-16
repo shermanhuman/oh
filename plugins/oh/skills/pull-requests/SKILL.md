@@ -1,6 +1,6 @@
 ---
 name: pull-requests
-description: Step-by-step procedure for preparing, opening and updating a pull request where every PR is a release - worktree setup, local tests and end-to-end checks, the review loop, the version bump, gh pr create, and what goes in the PR description. Use before opening a PR, when pushing more commits to an open PR, when running or posting a review round, or when the user asks to ship, open or update a PR.
+description: Step-by-step procedure for preparing, opening and updating a pull request where every PR is a release - worktree setup, local tests and end-to-end checks, the review loop, the version bump, gh pr create, what goes in the PR description, and keeping it mergeable and green until it merges. Use before opening a PR, when pushing more commits to an open PR, when a PR has conflicts or failing checks, before saying a PR is ready to merge, when running or posting a review round, or when the user asks to ship, open or update a PR.
 ---
 
 # Pull request procedure
@@ -28,7 +28,7 @@ The always-on *Pull requests are releases* section of the `oh` hook sets the pol
 2. **Build and test locally first.** Run the full test suites the way CI runs them (every configuration CI covers, such as each database or locale variant), the formatter check and a warnings-as-errors compile where the language has one. A failure that also fails on the default branch has to be shown failing there, not assumed.
 3. **Check user-facing changes end to end, locally.** When the repository has a local end-to-end setup (for example a browser test rig), run a scenario for every user-facing change and record what passed. For each key check, show once that it can fail: break the condition it checks (or invert the assertion), see it fail, then restore it. A check that has never failed may not be checking anything. When the repository has no end-to-end setup, say so in the PR and describe the manual check you ran instead.
 4. **Review before the PR opens.** Run `compound-v:review-loop` on the full diff against the default branch: round 1 with `compound-v:review`, `compound-v:followup` rounds on each fix diff, the independent full-diff pass, then one polish pass. Keep the decisions table from the plan (or start one) in the PR body or a file the reviewers read. Before opening, remove any debug output, temporary logging and stray TODOs you added.
-5. **Bump the version last,** using the `oh:release` skill and the hook's *Version bumps* section, once the work is tested and reviewed. An adequate bump already in this PR satisfies it. Take the number from the PR base at the time you open it, not from when the work started. If another PR merges first and the base reaches or passes your version, re-apply the same bump level to the base's version (a minor PR stays a minor bump).
+5. **Bump the version last,** using the `oh:release` skill and the hook's *Version bumps* section, once the work is tested and reviewed. An adequate bump already in this PR satisfies it. Take the number from the PR base when you bump, not from when the work started. If another PR merges first and the base reaches or passes your version, re-apply the same bump level to the base's version (a minor PR stays a minor bump).
 
 ## Opening the PR
 
@@ -41,6 +41,16 @@ mise exec -- gh pr create --title "<prefix>: short description" --body-file "$bo
 ```
 
 Describe the final change, migrations and rollout steps, and report the checks you actually ran with their exact commands and results (suites, end-to-end scenarios, review rounds), not a summary like "tests pass". Update the existing PR when continuing the same work.
+
+## Keeping it mergeable and green
+
+Until the user merges it, the PR's state is yours to watch:
+
+- **After every push**, watch the checks in the background: `mise exec -- gh pr checks <n> -R <owner>/<repo> --watch --interval 30` (run it from outside a worktree whose `mise.toml` isn't trusted, or mise refuses to start). Started within seconds of a push it can exit 1 with `no checks reported`: that's GitHub not having registered the runs yet, not "no CI", so put `sleep 30 &&` in front of it in the same background command. Fix what fails, push, watch again. A check that's red by design (Version Bump Check on a draft before the bump lands last) waits for the bump; everything else gets fixed. Don't report a PR as ready while a check is red or still running. In Codex the watch keeps running after the call returns but nothing wakes you when it ends: read its output before saying anything is green.
+- **Before saying anything is ready to merge**, and when you come back to a session with open PRs, look at each: `mise exec -- gh pr view <n> -R <owner>/<repo> --json state,isDraft,mergeable,mergeStateStatus,statusCheckRollup`. `mergeable: CONFLICTING` or `DIRTY` means merge the default branch in now; `BLOCKED` or `UNSTABLE` means a check is red, so read `statusCheckRollup`; `UNKNOWN` means GitHub hasn't computed it yet, so check again shortly rather than assuming it's fine. `BEHIND` only appears where the branch rules require up-to-date branches; elsewhere `git fetch` and `git log --oneline HEAD..origin/<default>` tell you the base moved. Checks don't rerun when the base moves, so a green rollup on a branch that's behind can be stale.
+- **When the base moves** (another PR merged), merge the default branch into your branch (no rebase or force-push), resolve conflicts, re-apply your version bump at the same level on top of the base's new version, run the affected checks locally, push, and watch CI again. Two PRs that set the same version line merge without a conflict and still fail the version check, so re-bump even when git reports none.
+- **A failure that isn't yours** (flaky, or failing on the default branch too) is shown failing on the default branch, with the run link, before you say so. Fix flakiness rather than re-running until green.
+- Tell the user what you found and fixed; a list of "ready to merge" PRs only includes ones that are open, non-draft, mergeable and green.
 
 ## Reviews on the PR
 
