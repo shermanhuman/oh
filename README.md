@@ -11,7 +11,7 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 
 | Plugin | What it holds | Where it's on |
 |---|---|---|
-| `oh` | Always-on: mise first, pull requests are releases, version bump per PR, questions with their context inside, reviewer choices (Fable high reviewers; Astra high through `codex exec` as the second voice). Skills: `pull-requests`, `release`, `mise`, `waxseal`, `dockerfile` | everywhere |
+| `oh` | Always-on: mise first, pull requests are releases, version bump per PR, questions with their context inside, watching your own PRs, reviewer choices (Fable high reviewers; Astra high through `codex exec` as the second voice). Skills: `pull-requests`, `release`, `mise`, `waxseal`, `dockerfile` | everywhere |
 | `oh-phoenix` | `phoenix` (LiveView, Ecto, migrations, architecture and testing references), `daisyui` | Elixir repositories |
 | `oh-tekmetric` | `tekmetric-api` with the full endpoint catalog | repositories that sync Tekmetric |
 | `oh-telnyx` | `telnyx-call-control` | voice/SMS repositories |
