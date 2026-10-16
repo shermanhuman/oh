@@ -313,7 +313,8 @@ def heredoc_reason(header, body, cwd, depth):
     argv = program(commands[-1])
     name = os.path.basename(argv[0]) if argv else ""
     # `bash <<EOF`, or the heredoc piped on into a shell: `cat <<EOF | bash`, `| ssh vm bash`.
-    later = simple_commands(re.sub(r"\d*>>?\s*\S+", " ", HEREDOC.sub(" ", header)))[0]
+    after = HEREDOC.split(header, maxsplit=1)[3]
+    later = simple_commands(re.sub(r"\d*>>?\s*\S+", " ", after))[0]
     if name in SHELLS or name == "ssh" or any(
         program(c) and os.path.basename(program(c)[0]) in SHELLS | {"ssh"} for c in later
     ):
