@@ -1,6 +1,6 @@
 ---
 name: pull-requests
-description: Step-by-step procedure for preparing, opening and updating a pull request where every PR is a release - worktree setup, local tests and end-to-end checks, the review loop, the version bump, gh pr create, and what goes in the PR description. Use before opening a PR, when pushing more commits to an open PR, when running or posting a review round, or when the user asks to ship, open or update a PR.
+description: Step-by-step procedure for preparing, opening and updating a pull request where every PR is a release - worktree setup, local tests and end-to-end checks, the review loop, the version bump, gh pr create, what goes in the PR description, and keeping it mergeable and green until it merges. Use before opening a PR, when pushing more commits to an open PR, when a PR has conflicts or failing checks, before saying a PR is ready to merge, when running or posting a review round, or when the user asks to ship, open or update a PR.
 ---
 
 # Pull request procedure
@@ -41,6 +41,16 @@ mise exec -- gh pr create --title "<prefix>: short description" --body-file "$bo
 ```
 
 Describe the final change, migrations and rollout steps, and report the checks you actually ran with their exact commands and results (suites, end-to-end scenarios, review rounds), not a summary like "tests pass". Update the existing PR when continuing the same work.
+
+## Keeping it mergeable and green
+
+Until the user merges it, the PR's state is yours to watch:
+
+- **After every push**, watch the checks in the background: `mise exec -- gh pr checks <n> -R <owner>/<repo> --watch --interval 30` (run it from outside a worktree whose `mise.toml` isn't trusted, or mise refuses to start). Fix what fails, push, watch again. Don't report a PR as ready while a check is red or still running.
+- **Before saying anything is ready to merge**, and when you come back to a session with open PRs, look at each: `mise exec -- gh pr view <n> -R <owner>/<repo> --json state,isDraft,mergeable,mergeStateStatus,statusCheckRollup`. `mergeable: CONFLICTING` or a `DIRTY`/`BEHIND` state means merge the default branch in now; `UNKNOWN` means GitHub hasn't computed it yet, so check again shortly rather than assuming it's fine.
+- **When the base moves** (another PR merged), merge the default branch into your branch (no rebase or force-push), resolve conflicts, re-apply your version bump at the same level on top of the base's new version, run the affected checks locally, push, and watch CI again. Two PRs that set the same version line merge without a conflict and still fail the version check, so re-bump even when git reports none.
+- **A failure that isn't yours** (flaky, or failing on the default branch too) is shown failing on the default branch, with the run link, before you say so. Fix flakiness rather than re-running until green.
+- Tell the user what you found and fixed; a list of "ready to merge" PRs only includes ones that are open, non-draft, mergeable and green.
 
 ## Reviews on the PR
 
