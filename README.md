@@ -23,7 +23,7 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 Compound V's [workflow](https://github.com/shermanhuman/compound-v#the-workflow) is the frame: pick, plan, review the plan, interrogate, build in a worktree, run the review loop, merge, file follow-ups. Oh adds my choices and the reasons for them:
 
 - **Mise first.** Every tool comes from mise, and runs through `mise exec` when the shell isn't activated, so nothing gets installed twice in different ways.
-- **A pull request is a release.** I keep one open PR per repository, batch the work, and test it locally before it opens. I merge. In my plugin repositories, PRs stay drafts until the last review round is clean (their `AGENTS.md` says so).
+- **A pull request is a release.** I keep one open PR per repository, batch the work, and test it locally before it opens. PRs stay drafts until the last review round is clean, and I merge.
 - **Worktrees, always.** My main checkouts run dev servers and sometimes hold another session's branch.
 - **Watch your own PRs.** After every push, the agent watches CI and mergeability, because I kept being the one who found the red check or the conflict.
 - **A version bump in every PR, done last.** It's re-applied when the base moves, because two PRs that set the same version line merge cleanly and then fail CI.
@@ -80,7 +80,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
-- oh 2.3.1: `pull-requests` follows the review loop's tiers (light for prose, full with the instructions pass for agent-instruction files); README rewritten around how I work, with gotchas.
+- oh 2.3.1: `pull-requests` follows the review loop's tiers and opens PRs as drafts before the first round; README rewritten around how I work, with gotchas.
 - oh 2.3.0: always-on *Sealed secrets go through waxseal* rule, plus a narrow PreToolUse guard (`hooks/waxseal-guard.py`) that refuses `kubeseal`, `gcloud secrets` changes and value reads, and Secret Manager URLs given to curl/wget, except inside waxseal's and oh's own source trees.
 - oh 2.2.0: always-on *Watch your pull requests* rule, with the commands in `pull-requests`: keep your open PRs mergeable and green, re-bump when the base moves, check before calling anything ready.
 - oh 2.1.0: always-on *Questions* rule — the context for a multiple-choice question goes inside the question, one decision per question when the topic is unfamiliar, plain text when the user asks to clarify.
