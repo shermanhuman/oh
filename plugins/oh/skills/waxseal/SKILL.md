@@ -7,7 +7,7 @@ description: WaxSeal 0.6+ SealedSecrets management — adding keys, copying a va
 
 Read [the focused guide](references/guide.md) when this integration is part of the current task. Use only the sections relevant to the operation being performed.
 
-Confirm the installed version first: `waxseal --version`, and use the version the repository pins (breakdown-infra pins it in `.mise.toml`; run `mise exec -- waxseal` when the shell isn't mise-activated). This guide describes **0.6.x**. 0.5 was a ground-up rewrite with a new command tree and no aliases for the old names (`addkey`, `updatekey`, `retirekey`, `edit`, `meta`, `advanced` are gone). 0.6 adds `--from-key` and records copies in metadata as `copiedFrom`, which 0.5 refuses to read, so a repository that has used `--from-key` needs 0.6 everywhere.
+Confirm the installed version first: `waxseal --version`. When the repository pins waxseal in its mise config, use that version (`mise exec -- waxseal` when the shell isn't mise-activated). This guide describes **0.6.x**. 0.5 was a ground-up rewrite with a new command tree and no aliases for the old names (`addkey`, `updatekey`, `retirekey`, `edit`, `meta`, `advanced` are gone). 0.6 adds `--from-key` and records copies in metadata as `copiedFrom`, which 0.5 refuses to read, so a repository that has used `--from-key` needs 0.6 everywhere.
 
 Every command can be driven entirely by flags. On a terminal, waxseal prompts for whatever is left out; with `--no-input` (or in CI) it fails instead, naming the missing flag. Secret values are never taken from the command line: use `--from-file PATH`, `--from-file -` for stdin, `--generate`, or `--from-key <secret>/<key>` to copy a value waxseal already stores.
 

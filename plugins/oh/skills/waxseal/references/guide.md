@@ -111,12 +111,12 @@ waxseal key set support-cannon-ghcr-pull-secret .dockerconfigjson \
 ```
 
 - **The source** may be active or retired. Its pinned version is copied into the new key's own GSM secret; the value never leaves waxseal. `--dry-run` shows the source and version that would be copied.
-- **What carries over:** the source key's kind (plain or computed, with its template), rotation mode and generator, and expiry. A new secret also gets the source secret's `--type`. `--rotation` and `--expires` override them, and `--expires none` drops an inherited expiry. `--template`, `--param`, `--generator` and `--bytes` are refused with `--from-key`; change those afterwards with `key edit`.
+- **What carries over:** the source key's kind (plain or computed, with its template), rotation mode and generator, and expiry. A new secret also gets the source secret's `--type`. `--rotation` and `--expires` override them, and `--expires none` drops an inherited expiry. `--rotation generated` needs a source with a generator; otherwise copy first, then `key edit <secret> <key> --rotation generated --generator <kind>`. `--template`, `--param`, `--generator` and `--bytes` are refused with `--from-key`; change those afterwards with `key edit`.
 - **It's a copy, not a shared reference.** Metadata records `copiedFrom: {shortName, keyName, version}`, and `secret show` lists it under COPIED FROM.
 - **Following the source:** after `key set`, `rotate` or `key edit --template/--param` on the source, Next prints one `waxseal key set <dst> <key> --from-key <src>/<key>` per copy. Run each. Until you do, `check metadata` warns that the copy is behind its source.
 - **Ending a copy:** setting the copy's value any other way (`key set --from-file/--generate`, `rotate`, or `import` of a cluster value that differs) makes it an ordinary key, and the output says so.
 - **`key set --from-key`** copies between keys of the same kind; for computed keys it copies the `{{secret}}` part and keeps the target's template. It refuses to copy from a key that was itself copied from the target, because that would make a loop.
-- **Name collisions:** GSM secret names are `<secret>-<key>`, so `a-b`/`c` and `a`/`b-c` collide. `key add` and `import` refuse a new key whose GSM secret another registered key already uses; pick another key or secret name.
+- **Name collisions:** GSM secret names are `<secret>-<key>`, with any character in the key outside `A-Z a-z 0-9 _ -` turned into `-` (so `.dockerconfigjson` is stored as `<secret>-dockerconfigjson`). That makes `a-b`/`c`, `a`/`b-c` and `a`/`b.c` collide. `key add` and `import` refuse a new key whose GSM secret another registered key already uses; pick another key or secret name.
 
 ## Rotation modes
 
