@@ -121,6 +121,11 @@ ASKED = [
     "echo 'kubectl delete ns x --context default' | tee run.sh && bash run.sh",
     "cat drop.sql | tee log | psql -h db.prod",
     "echo 'DROP TABLE t' |& psql -h db.prod",
+    "out=$(cat <<'SQL' | psql -h db.prod\nDROP TABLE t;\nSQL\n)",
+    "rows=$(psql -h db.prod -tA <<'SQL'\nDELETE FROM jobs;\nSQL\n)",
+    "git commit -m \"$(cat <<'EOF'\nfix\nEOF\n)\" && cat <<'EOF' | bash\nkubectl delete ns x --context default\nEOF",
+    "echo 'multi\nline' ; cat <<'EOF' | psql -h db.prod\nDROP TABLE t;\nEOF",
+    "cat <<'EOF' | ssh vm bash -s\nkubectl delete ns x\nEOF",
 ]
 
 # Everyday work, including the release routine, local clusters and local databases.
@@ -180,6 +185,9 @@ ALLOWED = [
     "gh api graphql -f query=@read.sql",
     "curl -X DELETE https://example.com/hook -d 'url=https://api.github.com/repos/o/r'",
     "git commit -m \"$(cat <<'EOF'\nfix\nEOF\n)\" && cat <<'EOF' | bash\necho ok\nEOF",
+    "echo 'a\nb'; cat <<'X' | bash\necho ok\nX\ncat <<'Y' > notes.md\nkubectl delete ns x --context default\nY",
+    "cat <<'EOF' | ssh vm 'cat >> notes.txt'\nkubectl delete ns x\nEOF",
+    "echo 'kubectl delete ns x' | ssh vm 'tee -a log.txt'",
     "cat <<'EOF' | tee notes.md\nkubectl delete ns x --context default\nEOF",
 ]
 

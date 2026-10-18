@@ -57,12 +57,15 @@ class Unparsed(ValueError):
     pass
 
 
-def lex(text):
+def lex(text, marks=None):
     """Split shell text into ("word", text) and ("op", text) tokens, the way a
     POSIX shell would: quotes are removed but never turn into operators or
     comments, `#` starts a comment only at the start of an unquoted word, and
-    unquoted `$(...)` and backticks become ("subst", inner text)."""
+    unquoted `$(...)` and backticks become ("subst", inner text). With a list
+    as `marks`, appends ("<<", offset) for each heredoc operator and
+    ("subst", start, end) for each unquoted command substitution it meets."""
     out, word, started, i, n = [], [], False, 0, len(text)
+    marks = marks if marks is not None else []
 
     def end_word():
         nonlocal word, started
@@ -113,6 +116,7 @@ def lex(text):
             if depth:
                 raise Unparsed("open $(")
             out.append(("subst", text[i + 2:k - 1]))
+            marks.append(("subst", i + 2, k - 1))
             started, i = True, k
         elif c in ";()\n":
             end_word()
@@ -123,6 +127,8 @@ def lex(text):
             k = i
             while k < n and text[k] in "<>&|":
                 k += 1
+            if text[i:k] == "<<":
+                marks.append(("<<", i))
             out.append(("op", text[i:k]))
             i = k
         else:

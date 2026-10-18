@@ -30,7 +30,8 @@ so there the asked cases are denied instead.
 
 Not covered: interpreter code, a port-forwarded production database (it
 looks like localhost), a database named by a pg_service.conf entry, and text
-inside double-quoted command substitutions. Contexts and hosts named only
+inside double-quoted command substitutions or quoted command strings
+(`ssh vm 'psql <<EOF ...'`). Contexts and hosts named only
 through shell variables set elsewhere count as production and ask. Fails open, with a note on stderr, on anything unexpected.
 """
 import importlib.util
@@ -413,7 +414,12 @@ def shell_consumer(argv, where):
     if name in SHELLS and not any(re.fullmatch(r"-[a-z]*c[a-z]*", a) for a in args):
         return where
     if name == "ssh":
-        return where.but(remote=True)
+        # stdin is a script only when the remote command is a shell reading it (`ssh vm`, `ssh vm bash -s`).
+        inner = ssh_command(args)
+        words = inner.split() if inner else []
+        if not words or (os.path.basename(words[0]) in SHELLS and not any(re.fullmatch(r"-[a-z]*c[a-z]*", w) for w in words[1:])):
+            return where.but(remote=True)
+        return None
     if name == "kubectl" and "--" in args and verb_of(args, KUBECTL_VALUE_OPTIONS)[0] == "exec":
         cut = args.index("--")
         if shell_consumer(args[cut + 1:], where) is not None:
@@ -507,19 +513,49 @@ def argv_findings(argv, where, depth):
         yield network_finding(args)
 
 
-def visible_heredocs(docs):
-    """Heredoc bodies in the order the main walk meets their `<<`. A heredoc inside
-    quotes or a command substitution (a commit message in "$(cat <<'EOF' ...)")
-    isn't on the walk, so it's left out rather than handed to the wrong command."""
-    bodies = []
-    for header, body in docs:
-        try:
-            tokens = shell.lex(header)
-        except shell.Unparsed:
-            continue
-        if any(kind == "op" and value in ("<<", "<<-") for kind, value in tokens):
+def attach_heredocs(main, docs):
+    """(bodies, substs): the body for each `<<` the main walk meets, in walk order,
+    and the text of each unquoted command substitution with the heredocs inside it
+    put back. A heredoc inside quotes (a commit message in "$(cat <<'EOF' ...)")
+    is on neither list, so it can't be handed to the wrong command."""
+    marks, offset = [], 0
+    try:
+        shell.lex(main, marks)
+    except shell.Unparsed:
+        for line in main.split("\n"):
+            line_marks = []
+            try:
+                shell.lex(line, line_marks)
+            except shell.Unparsed:
+                pass
+            marks += [(m[0], m[1] + offset, *[x + offset for x in m[2:]]) for m in line_marks]
+            offset += len(line) + 1
+    ops = {m[1] for m in marks if m[0] == "<<"}
+    spans = [(m[1], m[2]) for m in marks if m[0] == "subst"]
+    # Header lines are the lines of `main` that still match HEREDOC, in docs order.
+    headers, offset = [], 0
+    for line in main.split("\n"):
+        match = shell.HEREDOC.search(line)
+        if match:
+            headers.append((offset + match.start(), match.group(2)))
+        offset += len(line) + 1
+    bodies, inserts = [], {span: [] for span in spans}
+    for (start, delim), (header, body) in zip(headers, docs):
+        if start in ops:
             bodies.append(body)
-    return bodies
+            continue
+        inside = next((span for span in spans if span[0] <= start < span[1]), None)
+        if inside:
+            inserts[inside].append((start - inside[0], body, delim))
+    substs = []
+    for span in spans:
+        inner = main[span[0]:span[1]]
+        for rel, body, delim in sorted(inserts[span], reverse=True):
+            cut = inner.find("\n", rel)
+            cut = len(inner) if cut < 0 else cut
+            inner = inner[:cut] + "\n" + body + "\n" + delim + inner[cut:]
+        substs.append(inner)
+    return bodies, substs
 
 
 def findings(text, where, depth=0):
@@ -527,8 +563,9 @@ def findings(text, where, depth=0):
     if not text or depth > DEPTH or len(text) > MAX_TEXT:
         return
     main, docs = split_heredocs(text)
-    bodies = iter(visible_heredocs(docs))
-    for inner in simple_commands(main)[1]:
+    bodies, substs = attach_heredocs(main, docs)
+    bodies = iter(bodies)
+    for inner in substs:
         yield from findings(inner, where, depth + 1)
     here, piped = where, None
     for argv, redirects, end in piped_commands(main):
@@ -539,7 +576,7 @@ def findings(text, where, depth=0):
                 inputs.append(read(target, here))
             elif operator == "<<<":
                 inputs.append(target)
-            elif operator in ("<<", "<<-"):
+            elif operator == "<<":  # `<<-EOF` lexes as `<<` and the word `-EOF`
                 inputs.append(next(bodies, None))
         inputs = [text for text in inputs if text]
         piped = None
