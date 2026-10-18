@@ -387,7 +387,8 @@ def decide(event):
     return (
         f"Blocked by oh: this command {why}. Sealed secrets go through the waxseal CLI only: "
         "`waxseal key add|set|edit`, `waxseal reseal`, `waxseal secret list|show|retire`, "
-        "one visible command per call, values from --from-file, stdin or --generate. "
+        "one visible command per call, values from --from-file, stdin, --generate, "
+        "or --from-key for a value waxseal already stores. "
         "If waxseal can't do what you need, stop and ask the user; don't work around it. "
         "If gcloud needs a fresh login, ask the user to run `! gcloud auth login`."
     )
