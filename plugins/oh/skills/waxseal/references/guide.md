@@ -116,7 +116,7 @@ waxseal key set support-cannon-ghcr-pull-secret .dockerconfigjson \
 - **Following the source:** after `key set`, `rotate` or `key edit --template/--param` on the source, Next prints one `waxseal key set <dst> <key> --from-key <src>/<key>` per copy. Run each. Until you do, `check metadata` warns that the copy is behind its source.
 - **Ending a copy:** setting the copy's value any other way (`key set --from-file/--generate`, `rotate`, or `import` of a cluster value that differs) makes it an ordinary key, and the output says so.
 - **`key set --from-key`** copies between keys of the same kind; for computed keys it copies the `{{secret}}` part and keeps the target's template. It refuses to copy from a key that was itself copied from the target, because that would make a loop.
-- **Name collisions:** GSM secret names are `<secret>-<key>`, with any character in the key outside `A-Z a-z 0-9 _ -` turned into `-` (so `.dockerconfigjson` is stored as `<secret>-dockerconfigjson`). That makes `a-b`/`c`, `a`/`b-c` and `a`/`b.c` collide. `key add` and `import` refuse a new key whose GSM secret another registered key already uses; pick another key or secret name.
+- **Name collisions:** GSM secret names are `<secret>-<key>`, with any character in the key outside `A-Z a-z 0-9 _ -` turned into `-` and leading or trailing `-` dropped (so `.dockerconfigjson` is stored as `<secret>-dockerconfigjson`). That makes `a-b`/`c`, `a`/`b-c` and `a`/`b.c` collide, and `a`/`.b` with `a`/`b`. `key add` and `import` refuse a new key whose GSM secret another registered key already uses; pick another key or secret name.
 
 ## Rotation modes
 
