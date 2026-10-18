@@ -1,7 +1,7 @@
 {
   "name": "oh",
   "version": "2.3.1",
-  "description": "Sherman's working agreements for Claude Code and Codex: mise first, pull requests as releases, version bumps, questions with their context inside, watching your own PRs, sealed secrets through waxseal (with a guard hook), reviewer choices, plus release, waxseal, mise and Dockerfile skills.",
+  "description": "Sherman's working agreements for Claude Code and Codex: mise first, pull requests as releases, version bumps, questions with their context inside, watching your own PRs, sealed secrets through waxseal (with a guard hook), a production guard hook, reviewer choices, plus release, waxseal, mise and Dockerfile skills.",
   "author": {
     "name": "Sherman Boyd",
     "url": "https://github.com/shermanhuman"
