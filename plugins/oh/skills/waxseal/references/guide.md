@@ -1,4 +1,4 @@
-# WaxSeal 0.5 Skill
+# WaxSeal 0.6 Skill
 
 ## Contents
 
@@ -7,6 +7,7 @@
 - Command tree
 - Adding a key (and creating a secret)
 - Changing a value
+- Copying a stored value (`--from-key`)
 - Rotation modes
 - Computed keys (connection strings)
 - Registering existing manifests
@@ -16,7 +17,7 @@
 - Never do
 - Migrating from 0.4 (memory aid)
 
-> Go CLI that keeps the plaintext of every Kubernetes secret in Google Secret Manager (GSM) and only ciphertext in Git. Verified against waxseal 0.5.0 (2026-09-18); check `waxseal --version` before relying on any command here.
+> Go CLI that keeps the plaintext of every Kubernetes secret in Google Secret Manager (GSM) and only ciphertext in Git. Verified against waxseal 0.6.0 (2026-10-16); check `waxseal --version` before relying on any command here.
 
 ## Core mental model
 
@@ -71,7 +72,9 @@ waxseal key add my-app db_password --namespace prod --generate --generator rando
 echo -n 'app' | waxseal key add my-app username --namespace prod --rotation static --from-file - --no-input -y
 ```
 
-`key add` flags: `--namespace` (required on the first key), `--manifest` (default `apps/<secret>/sealed-secret.yaml`), `--name` (SealedSecret name, default the short name), `--scope strict|namespace-wide|cluster-wide`, `--type Opaque|kubernetes.io/basic-auth|kubernetes.io/tls|...`, `--rotation generated|external|static|unknown`, `--generate`, `--generator randomBase64|randomHex`, `--bytes N`, `--expires YYYY-MM-DD|none`, `--template`, `--param name=value`.
+`key add` flags: `--namespace` (required on the first key), `--manifest` (default `apps/<secret>/sealed-secret.yaml`), `--name` (SealedSecret name, default the short name), `--scope strict|namespace-wide|cluster-wide`, `--type Opaque|kubernetes.io/basic-auth|kubernetes.io/tls|...`, `--rotation generated|external|static|unknown`, `--generate`, `--generator randomBase64|randomHex`, `--bytes N`, `--from-key <secret>/<key>`, `--expires YYYY-MM-DD|none`, `--template`, `--param name=value`. `--from-file`, `--generate` and `--from-key` are mutually exclusive.
+
+`--generate` works with every `--rotation` mode. With a mode other than `generated` it makes the first value only, and no generator is recorded, so `key set --generate` and `rotate` won't touch the key later.
 
 The short name is the metadata file name; by default it is also the Kubernetes Secret's name. Pass `--name` when the Secret should be called something else.
 
@@ -86,6 +89,34 @@ waxseal key set my-app api_token --expires 2027-01-01 --from-file -            #
 ```
 
 `key set` creates a new GSM version, updates the pinned version in metadata and reseals. For a computed key the value is the `{{secret}}` part only.
+
+## Copying a stored value (`--from-key`)
+
+When a value waxseal already manages is needed in another secret (another namespace, or a new key name), copy it. Don't read it out of Secret Manager.
+
+```sh
+# The same registry credential in another namespace; the type (dockerconfigjson) comes from the source
+waxseal key add support-cannon-ghcr-pull-secret .dockerconfigjson --namespace support-cannon \
+  --name ghcr-pull-secret --manifest apps/supportcannon/ghcr-pull-secret-sealed.yaml \
+  --from-key default-ghcr-pull-secret/.dockerconfigjson --no-input -y
+
+# A key moving to a new secret under a new name, then the old one retired
+waxseal key add support-cannon-ai ANTHROPIC_API_KEY --namespace support-cannon \
+  --from-key default-ai/anthropic_api_key --no-input -y
+waxseal secret retire default-ai --replaced-by support-cannon-ai --no-input -y
+
+# The source got a new value: re-copy (this is what Next prints after key set/rotate on the source)
+waxseal key set support-cannon-ghcr-pull-secret .dockerconfigjson \
+  --from-key default-ghcr-pull-secret/.dockerconfigjson --no-input -y
+```
+
+- **The source** may be active or retired. Its pinned version is copied into the new key's own GSM secret; the value never leaves waxseal. `--dry-run` shows the source and version that would be copied.
+- **What carries over:** the source key's kind (plain or computed, with its template), rotation mode and generator, and expiry. A new secret also gets the source secret's `--type`. `--rotation` and `--expires` override them, and `--expires none` drops an inherited expiry. `--template`, `--param`, `--generator` and `--bytes` are refused with `--from-key`; change those afterwards with `key edit`.
+- **It's a copy, not a shared reference.** Metadata records `copiedFrom: {shortName, keyName, version}`, and `secret show` lists it under COPIED FROM.
+- **Following the source:** after `key set`, `rotate` or `key edit --template/--param` on the source, Next prints one `waxseal key set <dst> <key> --from-key <src>/<key>` per copy. Run each. Until you do, `check metadata` warns that the copy is behind its source.
+- **Ending a copy:** setting the copy's value any other way (`key set --from-file/--generate`, `rotate`, or `import` of a cluster value that differs) makes it an ordinary key, and the output says so.
+- **`key set --from-key`** copies between keys of the same kind; for computed keys it copies the `{{secret}}` part and keeps the target's template. It refuses to copy from a key that was itself copied from the target, because that would make a loop.
+- **Name collisions:** GSM secret names are `<secret>-<key>`, so `a-b`/`c` and `a`/`b-c` collide. `key add` and `import` refuse a new key whose GSM secret another registered key already uses; pick another key or secret name.
 
 ## Rotation modes
 
@@ -114,6 +145,15 @@ waxseal rotate my-app DATABASE_URL --no-input -y                               #
 
 `import` recognises connection strings in cluster secrets and turns them into computed keys. Prefer not to seal a DSN at all when the consumer can build it from a password env var — the coordinates are not secret.
 
+A template also gives a generated value a fixed shape, such as an encryption keyring entry:
+
+```sh
+waxseal key add my-app ENCRYPTION_KEYS --namespace prod --template 'v1:{{secret}}' \
+  --generate --generator randomBase64 --bytes 32 --rotation static --no-input -y
+```
+
+Give a keyring `--rotation static`, so `rotate` refuses it: rotating would replace `{{secret}}`, dropping `v1` and making data encrypted with it unreadable. waxseal can't rotate a keyring yet (shermanhuman/waxseal#5). Don't use `key set` on a templated keyring either, because it would seal `v1:<the whole new keyring>`. Ask the user.
+
 ## Registering existing manifests
 
 ```sh
@@ -132,7 +172,7 @@ waxseal check --fail-on-warning --warn-days 30
 waxseal reseal --skip-cert-check --no-input   # CI, no cluster access
 ```
 
-`check cluster` compares metadata against the live Secret's keys and manifest scope; a key present in metadata but missing from the cluster, or a manifest that has not been applied yet, is reported — expected for a secret on an unmerged branch.
+`check metadata` also warns when a copy is behind its source (with the re-copy command), and when keys sharing one GSM secret pin different versions of it. `check cluster` compares metadata against the live Secret's keys and manifest scope; a key present in metadata but missing from the cluster, or a manifest that has not been applied yet, is reported — expected for a secret on an unmerged branch.
 
 ## Prerequisites
 
@@ -153,6 +193,7 @@ apps/<...>/*sealed*.yaml       SealedSecret manifests (path per secret in metada
 
 - Never hand-write or hand-edit metadata, or `spec.encryptedData` — use `key add` / `key set` / `reseal`.
 - Never pass a secret value on the command line (there is no flag for it); never `echo` one into logs.
+- Never read a stored value out of Secret Manager to seal it somewhere else; use `--from-key`.
 - Never point metadata at a GSM version waxseal did not create; never use `latest`.
 - Never store non-secret configuration as a sealed key just to get it into a container when an env `value:` or the application's own config store will do — sealing is for secrets.
 - Do not rotate or retire because a reseal or check was requested. Scope stays with the named secrets and keys.

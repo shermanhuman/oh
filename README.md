@@ -80,6 +80,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.3.2: the `waxseal` skill covers waxseal 0.6: `--from-key` copies a value waxseal already stores (another namespace, a new key name) instead of a stop-and-ask, plus the fixed-shape keyring recipe. The always-on rule lists `--from-key` as a value source.
 - oh 2.3.1: `pull-requests` follows the review loop's tiers and opens PRs as drafts before the first round; README rewritten around how I work, with gotchas.
 - oh 2.3.0: always-on *Sealed secrets go through waxseal* rule, plus a narrow PreToolUse guard (`hooks/waxseal-guard.py`) that refuses `kubeseal`, `gcloud secrets` changes and value reads, and Secret Manager URLs given to curl/wget, except inside waxseal's and oh's own source trees.
 - oh 2.2.0: always-on *Watch your pull requests* rule, with the commands in `pull-requests`: keep your open PRs mergeable and green, re-bump when the base moves, check before calling anything ready.
