@@ -28,10 +28,10 @@ Files written earlier in the same command (`cat > run.sh <<EOF`,
 Codex can't ask from a hook (it logs the hook as failed and runs the command),
 so there the asked cases are denied instead.
 
-Not covered: interpreter code, a port-forwarded production database (it looks
-like localhost), a database named by a pg_service.conf entry, and text inside
-double-quoted command substitutions. Contexts and hosts named only through
-shell variables set elsewhere count as production and ask. Fails open, with a note on stderr, on anything unexpected.
+Not covered: interpreter code, a port-forwarded production database (it
+looks like localhost), a database named by a pg_service.conf entry, and text
+inside double-quoted command substitutions. Contexts and hosts named only
+through shell variables set elsewhere count as production and ask. Fails open, with a note on stderr, on anything unexpected.
 """
 import importlib.util
 import json
@@ -52,9 +52,7 @@ def load(name):
 
 
 shell = load("shell")
-SHELLS, SSH_VALUE_OPTIONS, ASSIGNMENT, HEREDOC, MAX_TEXT = (
-    shell.SHELLS, shell.SSH_VALUE_OPTIONS, shell.ASSIGNMENT, shell.HEREDOC, shell.MAX_TEXT
-)
+SHELLS, SSH_VALUE_OPTIONS, ASSIGNMENT, MAX_TEXT = shell.SHELLS, shell.SSH_VALUE_OPTIONS, shell.ASSIGNMENT, shell.MAX_TEXT
 split_heredocs, simple_commands, piped_commands, program, shell_script, command_text = (
     shell.split_heredocs, shell.simple_commands, shell.piped_commands, shell.program, shell.shell_script,
     shell.command_text,
@@ -318,7 +316,7 @@ def gh_finding(args, where):
 def network_finding(args):
     """curl, wget, httpie or xh calling the GitHub REST API to merge a PR or delete a repository."""
     for arg in args:
-        match = GITHUB_API.search(arg)
+        match = GITHUB_API.match(re.sub(r"^https?://", "", arg))
         if not match:
             continue
         method = option(args, "-X", "--request", "--method")
@@ -430,8 +428,8 @@ def script(name, where):
     return shell_script(name, where.cwd)
 
 
-def output(argv, where):
-    """What a command prints, when the guard can tell: echo, printf, cat of files."""
+def output(argv, where, stdin):
+    """What a command prints, when the guard can tell: echo, printf, cat, and tee passing stdin on."""
     run = program(argv)
     if not run:
         return None
@@ -442,7 +440,9 @@ def output(argv, where):
         return " ".join(args).replace("\\n", "\n")
     if name == "cat":
         files = [arg for arg in args if not arg.startswith("-")]
-        return "\n".join(read(f, where) or "" for f in files) if files else None
+        return "\n".join(read(f, where) or "" for f in files) if files else stdin
+    if name == "tee":
+        return stdin
     return None
 
 
@@ -507,33 +507,19 @@ def argv_findings(argv, where, depth):
         yield network_finding(args)
 
 
-def heredoc_findings(header, body, where, depth):
-    """A heredoc counts when a shell runs it, or psql reads it as SQL."""
-    parts = HEREDOC.split(header, maxsplit=1)
-    strip = lambda text: re.sub(r"\d*>>?\s*\S+", " ", text)
-    before = simple_commands(strip(parts[0]))[0] or [[]]
-    later = simple_commands(strip(parts[3]))[0]
-    for argv in [before[-1], *later]:
-        run = program(argv)
-        name = os.path.basename(run[0]) if run else ""
-        target = re.search(r"(?<![<>&\d])>>?\s*([^\s;&|<>]+)", parts[0] + parts[3])
-        written = target.group(1) if target and name == "cat" else next(
-            (arg for arg in run[1:] if not arg.startswith("-")), None) if name == "tee" else None
-        if written:
-            where.files[where.path(written.strip("'\""))] = body
-            return
-        if name == "gh" and "graphql" in run and MERGE_MUTATION.search(body):
-            yield DENY, "merges a pull request"
-            return
-        runs_in = shell_consumer(argv, where)
-        if runs_in is not None:
-            yield from findings(body, runs_in, depth + 1)
-            return
-        remote = sql_consumer(argv, where)
-        if remote is not None:
-            if remote:
-                yield sql_ask(body)
-            return
+def visible_heredocs(docs):
+    """Heredoc bodies in the order the main walk meets their `<<`. A heredoc inside
+    quotes or a command substitution (a commit message in "$(cat <<'EOF' ...)")
+    isn't on the walk, so it's left out rather than handed to the wrong command."""
+    bodies = []
+    for header, body in docs:
+        try:
+            tokens = shell.lex(header)
+        except shell.Unparsed:
+            continue
+        if any(kind == "op" and value in ("<<", "<<-") for kind, value in tokens):
+            bodies.append(body)
+    return bodies
 
 
 def findings(text, where, depth=0):
@@ -541,14 +527,22 @@ def findings(text, where, depth=0):
     if not text or depth > DEPTH or len(text) > MAX_TEXT:
         return
     main, docs = split_heredocs(text)
-    for header, body in docs:
-        yield from heredoc_findings(header, body, where, depth)
-    substs = simple_commands(main)[1]
-    for inner in substs:
+    bodies = iter(visible_heredocs(docs))
+    for inner in simple_commands(main)[1]:
         yield from findings(inner, where, depth + 1)
     here, piped = where, None
     for argv, redirects, end in piped_commands(main):
-        stdin, piped = piped, None
+        # What the command reads: the previous stage of a pipe, `< file`, a here-string or a heredoc.
+        inputs = [piped] if piped is not None else []
+        for operator, target in redirects:
+            if operator == "<":
+                inputs.append(read(target, here))
+            elif operator == "<<<":
+                inputs.append(target)
+            elif operator in ("<<", "<<-"):
+                inputs.append(next(bodies, None))
+        inputs = [text for text in inputs if text]
+        piped = None
         run = program(argv)
         if not run or run[0] == "export":
             env = dict(here.env)
@@ -558,18 +552,28 @@ def findings(text, where, depth=0):
         if run[0] == "cd" and len(run) == 2 and not here.remote:
             here = here.but(cwd=here.path(run[1]))
             continue
-        printed = output(argv, here)
-        if end == "|":
+        stdin = "\n".join(inputs) if inputs else None
+        printed = output(argv, here, stdin)
+        if end in ("|", "|&"):
             piped = printed
-        for operator, target in redirects:
-            # `printf 'kubectl delete ...' > zap.sh`, read when `bash zap.sh` runs later.
-            if operator in (">", ">>") and printed is not None:
-                here.files[here.path(target)] = printed
-        if sql_consumer(argv, here):
-            # SQL on psql's stdin: piped in, `< drop.sql`, or a here-string.
-            yield sql_ask(stdin)
+        # Files written here are read as written when a later command runs them:
+        # `cat > run.sh <<EOF`, `printf '...' > zap.sh`, `... | tee run.sh`.
+        if printed is not None:
             for operator, target in redirects:
-                yield sql_ask(read(target, here) if operator == "<" else target if operator == "<<<" else None)
+                if operator in (">", ">>", ">|", "&>", "&>>"):
+                    here.files[here.path(target)] = printed
+            if os.path.basename(run[0]) == "tee":
+                for name in positionals(run[1:], set()):
+                    here.files[here.path(name)] = printed
+        if inputs and sql_consumer(argv, here):
+            for sql in inputs:
+                yield sql_ask(sql)
+        runs_in = shell_consumer(argv, here) if inputs else None
+        if runs_in is not None:
+            for script_text in inputs:
+                yield from findings(script_text, runs_in, depth + 1)
+        if inputs and os.path.basename(run[0]) == "gh" and "graphql" in run and any(MERGE_MUTATION.search(x) for x in inputs):
+            yield DENY, "merges a pull request"
         yield from argv_findings(argv, here, depth)
 
 

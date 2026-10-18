@@ -108,6 +108,19 @@ ASKED = [
     "cd sql && cat drop.sql | psql -h db.prod",
     "psql 'hostaddr=10.0.0.5 dbname=app' -c 'DROP TABLE t'",
     "kubectl -v 6 delete pod x --context default",
+    "cat <<'SQL' | psql -h db.prod > out.txt\nDROP TABLE t;\nSQL",
+    "cat <<'EOF' | bash > /dev/null 2>&1\nkubectl delete ns x --context default\nEOF",
+    "cat <<'EOF' | ssh vm bash > log.txt\nkubectl delete ns x\nEOF",
+    "cat <<'EOF' | kubectl exec -i pod --context default -- psql > out.txt\nTRUNCATE t;\nEOF",
+    "cat <<'EOF' | tee run.sh | bash\nkubectl delete ns x --context default\nEOF",
+    "cat <<'EOF' | sudo tee /tmp/r.sh > /dev/null\nkubectl delete ns x --context default\nEOF\nbash /tmp/r.sh",
+    "cat <<'EOF' &> run.sh\nkubectl delete ns x --context default\nEOF\nbash run.sh",
+    "cd sql && cat > run.sh <<'EOF'\nkubectl delete ns x --context default\nEOF\nbash run.sh",
+    "echo 'kubectl delete ns x --context default' | bash",
+    "bash <<< 'kubectl delete ns x --context default'",
+    "echo 'kubectl delete ns x --context default' | tee run.sh && bash run.sh",
+    "cat drop.sql | tee log | psql -h db.prod",
+    "echo 'DROP TABLE t' |& psql -h db.prod",
 ]
 
 # Everyday work, including the release routine, local clusters and local databases.
@@ -165,6 +178,9 @@ ALLOWED = [
     "curl -s https://api.github.com/repos/o/r/pulls/12/merge",
     "curl -X DELETE https://api.github.com/repos/o/r/git/refs/heads/feat-x",
     "gh api graphql -f query=@read.sql",
+    "curl -X DELETE https://example.com/hook -d 'url=https://api.github.com/repos/o/r'",
+    "git commit -m \"$(cat <<'EOF'\nfix\nEOF\n)\" && cat <<'EOF' | bash\necho ok\nEOF",
+    "cat <<'EOF' | tee notes.md\nkubectl delete ns x --context default\nEOF",
 ]
 
 
