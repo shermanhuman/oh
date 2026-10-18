@@ -30,8 +30,8 @@ so there the asked cases are denied instead.
 
 Not covered: interpreter code, a port-forwarded production database (it
 looks like localhost), a database named by a pg_service.conf entry, and text
-inside double-quoted command substitutions or quoted command strings
-(`ssh vm 'psql <<EOF ...'`). Contexts and hosts named only
+inside double-quoted command substitutions, or a heredoc inside a quoted
+command string (`ssh vm 'psql <<EOF ...'`). Contexts and hosts named only
 through shell variables set elsewhere count as production and ask. Fails open, with a note on stderr, on anything unexpected.
 """
 import importlib.util
@@ -416,10 +416,13 @@ def shell_consumer(argv, where):
     if name == "ssh":
         # stdin is a script only when the remote command is a shell reading it (`ssh vm`, `ssh vm bash -s`).
         inner = ssh_command(args)
-        words = inner.split() if inner else []
-        if not words or (os.path.basename(words[0]) in SHELLS and not any(re.fullmatch(r"-[a-z]*c[a-z]*", w) for w in words[1:])):
+        if inner is None:
             return where.but(remote=True)
-        return None
+        try:  # the remote shell re-lexes the joined words, so wrappers (`sudo bash`) count too
+            words = [value for kind, value in shell.lex(inner) if kind == "word"]
+        except shell.Unparsed:
+            return None
+        return where.but(remote=True) if shell_consumer(words, where) is not None else None
     if name == "kubectl" and "--" in args and verb_of(args, KUBECTL_VALUE_OPTIONS)[0] == "exec":
         cut = args.index("--")
         if shell_consumer(args[cut + 1:], where) is not None:
@@ -453,10 +456,22 @@ def output(argv, where, stdin):
 
 
 def ssh_command(args):
-    i = 0
-    while i < len(args) and args[i].startswith("-"):
-        i += 2 if len(args[i]) == 2 and args[i][1] in SSH_VALUE_OPTIONS else 1
-    return " ".join(args[i + 1:]) if i + 1 < len(args) else None
+    """The remote command, joined the way ssh sends it. ssh takes options before
+    and after the host (`ssh vm -t bash`) until `--`."""
+    i, host = 0, None
+    while i < len(args):
+        if args[i] == "--":
+            i += 1
+            if host is None and i < len(args):
+                host, i = args[i], i + 1
+            break
+        if args[i].startswith("-"):
+            i += 2 if len(args[i]) == 2 and args[i][1] in SSH_VALUE_OPTIONS else 1
+        elif host is None:
+            host, i = args[i], i + 1
+        else:
+            break
+    return " ".join(args[i:]) if host is not None and i < len(args) else None
 
 
 def argv_findings(argv, where, depth):

@@ -107,6 +107,7 @@ def lex(text, marks=None):
             if close < 0:
                 raise Unparsed("open backtick")
             out.append(("subst", text[i + 1:close]))
+            marks.append(("subst", i + 1, close))
             started, i = True, close + 1
         elif c == "$" and text[i + 1:i + 2] == "(":
             depth, k = 1, i + 2

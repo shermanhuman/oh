@@ -60,6 +60,7 @@ DENIED = [
     "curl -X DELETE https://api.github.com/repos/o/r",
     "xh PUT api.github.com/repos/o/r/pulls/12/merge",
     "printf 'gh pr merge 12\\n' > m.sh && bash m.sh",
+    "out=`git push --force origin main`",
 ]
 
 # Irreversible in production: the user approves each one.
@@ -126,6 +127,11 @@ ASKED = [
     "git commit -m \"$(cat <<'EOF'\nfix\nEOF\n)\" && cat <<'EOF' | bash\nkubectl delete ns x --context default\nEOF",
     "echo 'multi\nline' ; cat <<'EOF' | psql -h db.prod\nDROP TABLE t;\nEOF",
     "cat <<'EOF' | ssh vm bash -s\nkubectl delete ns x\nEOF",
+    "cat <<'EOF' | ssh vm sudo bash\nkubectl delete ns x\nEOF",
+    "cat <<'EOF' | ssh vm -t bash\nkubectl delete ns x\nEOF",
+    "ssh vm -t 'psql -h db.prod -c \"DROP TABLE t\"'",
+    "x=`psql -h db.prod -c 'DROP TABLE t'`; echo $x",
+    "echo `kubectl delete ns x --context default`",
 ]
 
 # Everyday work, including the release routine, local clusters and local databases.
