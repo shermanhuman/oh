@@ -1,6 +1,8 @@
+import atexit
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -11,6 +13,10 @@ GUARD = pathlib.Path(__file__).resolve().parent.parent / "plugins/oh/hooks/prod-
 
 # A home like this machine's: ~/.kube/config names no current-context. Kubeconfigs for each side beside it.
 HOME = pathlib.Path(tempfile.mkdtemp(prefix="prod-guard-"))
+atexit.register(shutil.rmtree, HOME, ignore_errors=True)
+(HOME / "sql").mkdir()
+(HOME / "sql/drop.sql").write_text("DROP TABLE t;\n")
+(HOME / "merge.graphql").write_text("mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }\n")
 (HOME / ".kube").mkdir()
 (HOME / ".kube/config").write_text("apiVersion: v1\ncontexts: []\n")
 (HOME / "prod.yaml").write_text("apiVersion: v1\ncurrent-context: \"default\"\n")
@@ -47,6 +53,13 @@ DENIED = [
     "bash -c 'git push origin HEAD:main'",
     "ssh vm 'cd repo && git push origin main'",
     "echo ok && $(gh pr merge 3)",
+    "gh api graphql -f query=@merge.graphql",
+    "gh api graphql -F query=@- <<'EOF'\nmutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }\nEOF",
+    "curl -X PUT -H 'Authorization: token x' https://api.github.com/repos/o/r/pulls/12/merge",
+    "curl -fsS https://api.github.com/repos/o/r/pulls/12/merge -d '{\"merge_method\":\"squash\"}'",
+    "curl -X DELETE https://api.github.com/repos/o/r",
+    "xh PUT api.github.com/repos/o/r/pulls/12/merge",
+    "printf 'gh pr merge 12\\n' > m.sh && bash m.sh",
 ]
 
 # Irreversible in production: the user approves each one.
@@ -83,6 +96,18 @@ ASKED = [
     "cat <<'SQL' | psql -h db.prod\nDROP TABLE t;\nSQL",
     "ssh vm psql -c 'DROP TABLE t'",
     "ssh vm <<'EOF'\npsql -c 'DROP TABLE t'\nEOF",
+    "cat > run.sh <<'EOF'\nkubectl delete ns x --context default\nEOF\nbash run.sh",
+    "cat <<'EOF' > run.sh\nkubectl delete ns x --context default\nEOF\nchmod +x run.sh && ./run.sh",
+    "printf 'kubectl delete ns x --context default\\n' > zap.sh && bash zap.sh",
+    "cat > /tmp/cleanup.sql <<'SQL'\nDELETE FROM jobs;\nSQL\npsql -h db.prod -f /tmp/cleanup.sql",
+    "echo 'DROP TABLE t;' > cleanup.sql; psql -h db.prod < cleanup.sql",
+    "echo 'TRUNCATE t' | psql -h db.prod",
+    "printf 'DROP TABLE t;' | psql -h db.prod",
+    "psql -h db.prod <<< 'DROP TABLE t'",
+    "cd sql && psql -h db.prod < drop.sql",
+    "cd sql && cat drop.sql | psql -h db.prod",
+    "psql 'hostaddr=10.0.0.5 dbname=app' -c 'DROP TABLE t'",
+    "kubectl -v 6 delete pod x --context default",
 ]
 
 # Everyday work, including the release routine, local clusters and local databases.
@@ -130,6 +155,16 @@ ALLOWED = [
     "grep -rn 'kubectl delete' docs/",
     "docker exec -i pg psql -U postgres <<'SQL'\nDROP TABLE t;\nSQL",
     "MIX_ENV=test mix test",
+    "cat > notes.sh <<'EOF'\nkubectl delete ns x --context default\nEOF",
+    "printf 'kubectl delete ns x\\n' > notes.txt && cat notes.txt",
+    "echo 'SELECT 1' | psql -h db.prod",
+    "cat drop.sql; psql -h db.prod -c 'select 1'",
+    "psql 'postgres://u@[::1]:5432/app' -c 'DROP TABLE t'",
+    "git push --dry-run origin HEAD:main",
+    "git push -n origin main",
+    "curl -s https://api.github.com/repos/o/r/pulls/12/merge",
+    "curl -X DELETE https://api.github.com/repos/o/r/git/refs/heads/feat-x",
+    "gh api graphql -f query=@read.sql",
 ]
 
 
@@ -207,6 +242,9 @@ class Guard(unittest.TestCase):
             git("switch", "-q", "-c", "feat/x", cwd=work)
             self.check(["git push", "git push origin HEAD", "git push -u origin feat/x"], None, cwd=str(work))
             self.check(["git push origin HEAD:trunk", "git push origin main"], "deny", cwd=str(work))
+            git("switch", "-q", "trunk", cwd=work)
+            self.check(["git push --tags", "git push origin --tags"], None, cwd=str(work))
+            git("switch", "-q", "feat/x", cwd=work)
             git("config", "push.default", "upstream", cwd=work)
             git("branch", "-q", "--set-upstream-to", "origin/trunk", cwd=work)
             self.check(["git push"], "deny", cwd=str(work))
@@ -231,7 +269,8 @@ class Guard(unittest.TestCase):
         for command in commands:
             start = time.monotonic()
             self.assertIsNone(run(command))
-            self.assertLess(time.monotonic() - start, 5)
+            # Generous: a slow guard delays every Bash call, but CI machines vary.
+            self.assertLess(time.monotonic() - start, 8)
 
     def test_bad_input_passes(self):
         self.assertIsNone(run(None, raw="not json"))

@@ -213,3 +213,37 @@ def command_text(tool_input):
     if isinstance(command, list):
         return shlex.join(str(part) for part in command)
     return command if isinstance(command, str) else ""
+
+
+def piped_commands(text):
+    """Simple commands as (argv, redirects, end): redirects are (operator, target)
+    pairs such as (">", "out.sh") or ("<<<", "here-string"), and end is the operator
+    that ends the command ("|" when it feeds the next one). Command substitutions
+    are left out; read them with simple_commands."""
+    try:
+        chunks = [lex(text)]
+    except Unparsed:
+        chunks = []
+        for line in text.split("\n"):
+            try:
+                chunks.append(lex(line))
+            except Unparsed:
+                pass
+    out = []
+    for chunk in chunks:
+        argv, redirects, pending = [], [], None
+        for kind, value in chunk:
+            if kind == "subst":
+                continue
+            if kind == "op" and set(value) & set("<>"):
+                pending = value
+            elif kind == "op":
+                out.append((argv, redirects, value))
+                argv, redirects, pending = [], [], None
+            elif pending:
+                redirects.append((pending, value))
+                pending = None
+            else:
+                argv.append(value)
+        out.append((argv, redirects, None))
+    return [(argv, redirects, end) for argv, redirects, end in out if argv or redirects]

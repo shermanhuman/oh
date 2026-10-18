@@ -19,14 +19,19 @@ Asked, so the user approves with one key:
   can't resolve counts as production. Dry runs pass.
 - `psql` running DROP, TRUNCATE, ALTER TABLE ... DROP or DELETE without WHERE
   against a host that isn't local, or inside `kubectl exec` on a non-local
-  context, or over ssh; SQL from -c, -f, a heredoc, `< file` or `cat file |`.
+  context, or over ssh; SQL from -c, -f, a heredoc, a here-string, `< file`,
+  or `cat`/`echo`/`printf` piped in.
+
+Files written earlier in the same command (`cat > run.sh <<EOF`,
+`printf ... > drop.sql`) are read as written when a later command runs them.
 
 Codex can't ask from a hook (it logs the hook as failed and runs the command),
 so there the asked cases are denied instead.
 
 Not covered: interpreter code, a port-forwarded production database (it looks
-like localhost), contexts or hosts named only through shell variables set
-elsewhere. Fails open, with a note on stderr, on anything unexpected.
+like localhost), a database named by a pg_service.conf entry, and text inside
+double-quoted command substitutions. Contexts and hosts named only through
+shell variables set elsewhere count as production and ask. Fails open, with a note on stderr, on anything unexpected.
 """
 import importlib.util
 import json
@@ -50,8 +55,9 @@ shell = load("shell")
 SHELLS, SSH_VALUE_OPTIONS, ASSIGNMENT, HEREDOC, MAX_TEXT = (
     shell.SHELLS, shell.SSH_VALUE_OPTIONS, shell.ASSIGNMENT, shell.HEREDOC, shell.MAX_TEXT
 )
-split_heredocs, simple_commands, program, shell_script, command_text = (
-    shell.split_heredocs, shell.simple_commands, shell.program, shell.shell_script, shell.command_text
+split_heredocs, simple_commands, piped_commands, program, shell_script, command_text = (
+    shell.split_heredocs, shell.simple_commands, shell.piped_commands, shell.program, shell.shell_script,
+    shell.command_text,
 )
 
 DENY, ASK = "deny", "ask"
@@ -60,11 +66,16 @@ LOCAL_CONTEXT = re.compile(r"(kind|k3d)-.+|minikube|docker-desktop|orbstack|ranc
 LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
 DEFAULT_BRANCHES = {"main", "master"}
 CURRENT_CONTEXT = re.compile(r"^current-context:\s*[\"']?([^\s\"']+)", re.M)
+MERGE_MUTATION = re.compile(r"\b(mergePullRequest|enablePullRequestAutoMerge)\b")
+GITHUB_API = re.compile(r"api\.github\.com/(repos/[^/\s?#]+/[^/\s?#]+(?:/pulls/[^/\s?#]+/merge)?)/?(?:[?#\s]|$)")
+NETWORK = {"curl", "wget", "http", "https", "xh"}
+HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 
 KUBECTL_VALUE_OPTIONS = {
     "-n", "--namespace", "--context", "--kubeconfig", "--cluster", "--user", "-s", "--server", "--token",
     "--as", "--as-group", "--as-uid", "--request-timeout", "--certificate-authority", "--client-certificate",
     "--client-key", "--tls-server-name", "--cache-dir", "--log-file", "--username", "--password",
+    "-v", "--v", "--profile", "--profile-output", "--log-flush-frequency", "--vmodule",
 }
 HELM_VALUE_OPTIONS = {
     "-n", "--namespace", "--kube-context", "--kubeconfig", "--kube-apiserver", "--kube-as-user",
@@ -87,13 +98,19 @@ PSQL_VALUE_OPTIONS = {
 
 class Where:
     """Where a command runs: its directory, whether it runs on another machine
-    (over ssh or inside a production pod), and variables set earlier in the text."""
+    (over ssh or inside a production pod), variables set earlier in the text,
+    and files written earlier in the text (path -> contents, shared by every copy)."""
 
-    def __init__(self, cwd, remote=False, env=None):
+    def __init__(self, cwd, remote=False, env=None, files=None):
         self.cwd, self.remote, self.env = cwd, remote, dict(env or {})
+        self.files = {} if files is None else files
 
     def but(self, cwd=None, remote=None, env=None):
-        return Where(cwd or self.cwd, self.remote if remote is None else remote, self.env if env is None else env)
+        return Where(cwd or self.cwd, self.remote if remote is None else remote,
+                     self.env if env is None else env, self.files)
+
+    def path(self, name):
+        return os.path.normpath(os.path.join(self.cwd, os.path.expanduser(name)))
 
 
 def options(args, *names):
@@ -136,10 +153,11 @@ def assignments(argv):
     return dict(word.split("=", 1) for word in argv[:len(argv) - len(run)] if ASSIGNMENT.match(word))
 
 
-def read(path, cwd):
-    path = pathlib.Path(path).expanduser()
-    if not path.is_absolute():
-        path = pathlib.Path(cwd) / path
+def read(name, where):
+    """A file's text, as written earlier in the command if it was, else from disk."""
+    if where.path(name) in where.files:
+        return where.files[where.path(name)]
+    path = pathlib.Path(where.path(name))
     try:
         if path.is_file() and path.stat().st_size <= MAX_TEXT:
             return path.read_text(encoding="utf-8", errors="ignore")
@@ -148,13 +166,13 @@ def read(path, cwd):
     return None
 
 
-def current_context(kubeconfig, env, cwd):
+def current_context(kubeconfig, env, where):
     """The current-context of the first file in a KUBECONFIG list that names one; None if unknown."""
     for entry in kubeconfig.split(":"):
         expanded = _expand(entry, env)
         if "$" in expanded:
             return None
-        text = read(expanded, cwd)
+        text = read(expanded, where)
         match = CURRENT_CONTEXT.search(text) if text else None
         if match:
             return match.group(1)
@@ -173,7 +191,7 @@ def kube_context(args, where, env, flag="--context"):
         return None
     merged = {**os.environ, **where.env, **env}
     kubeconfig = option(args, "--kubeconfig") or merged.get("KUBECONFIG") or "~/.kube/config"
-    return current_context(kubeconfig, merged, where.cwd)
+    return current_context(kubeconfig, merged, where)
 
 
 def is_local(context):
@@ -241,6 +259,8 @@ def git_finding(args, where):
         return None
     rest = args[i + 1:]
     flags = [arg for arg in rest if arg.startswith("-")]
+    if any(arg == "--dry-run" or re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", arg) for arg in flags):
+        return None
     if any(
         arg in ("--force", "--force-with-lease") or arg.startswith("--force-with-lease=")
         or re.fullmatch(r"-[a-zA-Z]*f[a-zA-Z]*", arg)
@@ -259,7 +279,7 @@ def git_finding(args, where):
         head = git(repo, "symbolic-ref", "-q", "--short", f"refs/remotes/{remote}/HEAD")
         if head:
             defaults.add(head.split("/", 1)[-1])
-    for spec in refspecs or ["HEAD"]:
+    for spec in refspecs or ([] if "--tags" in flags else ["HEAD"]):
         source, colon, destination = spec.partition(":")
         target = destination if colon else source
         if target == "HEAD":
@@ -274,7 +294,7 @@ def git_finding(args, where):
     return (DENY, f"pushes to the default branch `{hit}`") if hit else None
 
 
-def gh_finding(args):
+def gh_finding(args, where):
     words = positionals(args, GH_VALUE_OPTIONS | GH_API_VALUE_OPTIONS)
     if words[:2] == ["pr", "merge"]:
         return DENY, "merges a pull request"
@@ -287,10 +307,30 @@ def gh_finding(args):
     method = (option(args, "-X", "--method") or ("POST" if fields or "--input" in args else "GET")).upper()
     if re.fullmatch(r"repos/[^/]+/[^/]+/pulls/[^/]+/merge", endpoint) and method in ("PUT", "POST"):
         return DENY, "merges a pull request"
-    if endpoint == "graphql" and any(re.search(r"\b(mergePullRequest|enablePullRequestAutoMerge)\b", f) for f in fields):
+    bodies = [(read(f.split("=@", 1)[1], where) or "") if "=@" in f else f for f in fields]
+    if endpoint == "graphql" and any(MERGE_MUTATION.search(body) for body in bodies):
         return DENY, "merges a pull request"
     if method == "DELETE" and re.fullmatch(r"repos/[^/]+/[^/]+/?", endpoint):
         return DENY, "deletes a repository"
+    return None
+
+
+def network_finding(args):
+    """curl, wget, httpie or xh calling the GitHub REST API to merge a PR or delete a repository."""
+    for arg in args:
+        match = GITHUB_API.search(arg)
+        if not match:
+            continue
+        method = option(args, "-X", "--request", "--method")
+        if not method:
+            named = [a.upper() for a in args if a.upper() in HTTP_METHODS]
+            sends = any(a.startswith(("-d", "--data", "--json", "--form", "-F", "--post")) for a in args)
+            method = named[0] if named else ("POST" if sends else "GET")
+        method, path = method.upper(), match.group(1)
+        if path.endswith("/merge") and method in ("PUT", "POST"):
+            return DENY, "merges a pull request"
+        if not path.endswith("/merge") and method == "DELETE":
+            return DENY, "deletes a repository"
     return None
 
 
@@ -300,9 +340,9 @@ def remote_host(args, env):
     for arg in args:
         uri = re.match(r"postgres(?:ql)?://(?:[^@/]*@)?([^/?]*)", arg)
         if uri:
-            hosts.append(re.sub(r":\d+$", "", uri.group(1)) if not uri.group(1).startswith("[") else uri.group(1))
+            hosts.append(re.sub(r"(\]|^[^\[\]]*):\d+$", r"\1", uri.group(1)))
             hosts += re.findall(r"[?&]host=([^&]+)", arg)
-        hosts += re.findall(r"(?:^|\s)host=(\S+)", arg)
+        hosts += re.findall(r"(?:^|\s)host(?:addr)?=(\S+)", arg)
     if not hosts and env.get("PGHOST"):
         hosts = [env["PGHOST"]]
     for value in hosts:
@@ -342,7 +382,7 @@ def psql_findings(args, where, env):
     for sql in options(args, "-c", "--command"):
         yield sql_ask(sql)
     for path in options(args, "-f", "--file"):
-        yield sql_ask(read(path, where.cwd)) if path != "-" else None
+        yield sql_ask(read(path, where)) if path != "-" else None
 
 
 def sql_consumer(argv, where):
@@ -383,6 +423,29 @@ def shell_consumer(argv, where):
     return None
 
 
+def script(name, where):
+    """The path and text of a shell script about to run, including one written earlier in the command."""
+    if where.path(name) in where.files:
+        return pathlib.Path(where.path(name)), where.files[where.path(name)]
+    return shell_script(name, where.cwd)
+
+
+def output(argv, where):
+    """What a command prints, when the guard can tell: echo, printf, cat of files."""
+    run = program(argv)
+    if not run:
+        return None
+    name, args = os.path.basename(run[0]), run[1:]
+    if name == "echo":
+        return " ".join(arg for arg in args if arg not in ("-n", "-e", "-E"))
+    if name == "printf":
+        return " ".join(args).replace("\\n", "\n")
+    if name == "cat":
+        files = [arg for arg in args if not arg.startswith("-")]
+        return "\n".join(read(f, where) or "" for f in files) if files else None
+    return None
+
+
 def ssh_command(args):
     i = 0
     while i < len(args) and args[i].startswith("-"):
@@ -404,13 +467,13 @@ def argv_findings(argv, where, depth):
             if i > 0 and re.fullmatch(r"[-+][a-zA-Z]*[oO]", args[i - 1]):
                 continue
             if not flag.startswith(("-", "+")):
-                path, text = shell_script(flag, where.cwd)
+                path, text = script(flag, where)
                 if text:
                     yield from findings(text, where.but(cwd=str(path.parent)), depth + 1)
                 return
         return
     if "/" in run[0]:
-        path, text = shell_script(run[0], where.cwd)
+        path, text = script(run[0], where)
         if text:
             yield from findings(text, where.but(cwd=str(path.parent)), depth + 1)
             return
@@ -437,9 +500,11 @@ def argv_findings(argv, where, depth):
     elif name == "git":
         yield git_finding(args, where)
     elif name == "gh":
-        yield gh_finding(args)
+        yield gh_finding(args, where)
     elif name == "psql":
         yield from psql_findings(args, where, env)
+    elif name in NETWORK:
+        yield network_finding(args)
 
 
 def heredoc_findings(header, body, where, depth):
@@ -449,6 +514,17 @@ def heredoc_findings(header, body, where, depth):
     before = simple_commands(strip(parts[0]))[0] or [[]]
     later = simple_commands(strip(parts[3]))[0]
     for argv in [before[-1], *later]:
+        run = program(argv)
+        name = os.path.basename(run[0]) if run else ""
+        target = re.search(r"(?<![<>&\d])>>?\s*([^\s;&|<>]+)", parts[0] + parts[3])
+        written = target.group(1) if target and name == "cat" else next(
+            (arg for arg in run[1:] if not arg.startswith("-")), None) if name == "tee" else None
+        if written:
+            where.files[where.path(written.strip("'\""))] = body
+            return
+        if name == "gh" and "graphql" in run and MERGE_MUTATION.search(body):
+            yield DENY, "merges a pull request"
+            return
         runs_in = shell_consumer(argv, where)
         if runs_in is not None:
             yield from findings(body, runs_in, depth + 1)
@@ -467,11 +543,12 @@ def findings(text, where, depth=0):
     main, docs = split_heredocs(text)
     for header, body in docs:
         yield from heredoc_findings(header, body, where, depth)
-    commands, substs = simple_commands(main)
+    substs = simple_commands(main)[1]
     for inner in substs:
         yield from findings(inner, where, depth + 1)
-    here, remote_sql = where, False
-    for argv in commands:
+    here, piped = where, None
+    for argv, redirects, end in piped_commands(main):
+        stdin, piped = piped, None
         run = program(argv)
         if not run or run[0] == "export":
             env = dict(here.env)
@@ -479,18 +556,21 @@ def findings(text, where, depth=0):
             here = here.but(env=env)
             continue
         if run[0] == "cd" and len(run) == 2 and not here.remote:
-            here = here.but(cwd=str(pathlib.Path(here.cwd) / os.path.expanduser(run[1])))
+            here = here.but(cwd=here.path(run[1]))
             continue
-        remote_sql = remote_sql or bool(sql_consumer(argv, here))
+        printed = output(argv, here)
+        if end == "|":
+            piped = printed
+        for operator, target in redirects:
+            # `printf 'kubectl delete ...' > zap.sh`, read when `bash zap.sh` runs later.
+            if operator in (">", ">>") and printed is not None:
+                here.files[here.path(target)] = printed
+        if sql_consumer(argv, here):
+            # SQL on psql's stdin: piped in, `< drop.sql`, or a here-string.
+            yield sql_ask(stdin)
+            for operator, target in redirects:
+                yield sql_ask(read(target, here) if operator == "<" else target if operator == "<<<" else None)
         yield from argv_findings(argv, here, depth)
-    if remote_sql:
-        # SQL on psql's stdin: `psql < drop.sql`, `cat drop.sql | psql`.
-        files = re.findall(r"(?<![<\d])<(?![<(])\s*([^\s;&|<>()]+)", main)
-        for argv in map(program, commands):
-            if argv and os.path.basename(argv[0]) == "cat":
-                files += [arg for arg in argv[1:] if not arg.startswith("-")]
-        for path in files:
-            yield sql_ask(read(path, where.cwd))
 
 
 def decide(event):
