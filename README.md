@@ -28,6 +28,7 @@ Compound V's [workflow](https://github.com/shermanhuman/compound-v#the-workflow)
 - **Watch your own PRs.** After every push, the agent watches CI and mergeability, because I kept being the one who found the red check or the conflict.
 - **A version bump in every PR, done last.** It's re-applied when the base moves, because two PRs that set the same version line merge cleanly and then fail CI.
 - **Sealed secrets only through waxseal**, one visible command per call, with a guard hook that refuses `kubeseal`, `gcloud secrets` changes and value reads, and Secret Manager URLs (details in the `oh:waxseal` skill and the hook text).
+- **A production guard instead of a sandbox.** I run Claude Code with `--dangerously-skip-permissions` so it never stops to ask while coding. A guard hook refuses what is always mine (merging, pushing to a default branch, force-pushing, deleting a repository) and asks me before irreversible production actions (deletes, drains and scale-to-zero on a non-local cluster, `helm uninstall`, destructive SQL on a remote database). The release routine never prompts.
 - **Questions carry their own context**, because text above a question widget goes unread.
 - **Reviewers:** Fable at high effort for review subagents, and Astra high through `codex exec` as the second voice.
 - **`/next` without the prefix.** A one-line personal skill at `~/.claude/skills/next/SKILL.md` ("Use the `compound-v:next` skill with: $ARGUMENTS") lets me type `/next` instead of `/compound-v:next` in Claude Code. A plugin can't add a bare command, so it lives only on my machine; in Codex it's still `$compound-v:next`.
@@ -54,7 +55,7 @@ codex plugin add oh@compound-v
 codex plugin add oh-phoenix@compound-v
 ```
 
-Install the other `oh-*` plugins the same way. Start a new Claude Code session (or run `/reload-plugins`). In Codex, open `/hooks` and trust oh's two hooks (the session-start rules and the waxseal guard) and Compound V's. Updating works as in [Compound V's README](https://github.com/shermanhuman/compound-v#updating): in Claude Code, auto-update or `claude plugin update oh@compound-v`; in Codex, `codex plugin add oh@compound-v`.
+Install the other `oh-*` plugins the same way. Start a new Claude Code session (or run `/reload-plugins`). In Codex, open `/hooks` and trust oh's three hooks (the session-start rules, the waxseal guard and the production guard) and Compound V's. Trust is per hook definition, so an update that changes `hooks.json` asks again. Updating works as in [Compound V's README](https://github.com/shermanhuman/compound-v#updating): in Claude Code, auto-update or `claude plugin update oh@compound-v`; in Codex, `codex plugin add oh@compound-v`.
 
 ## Stack and API plugins per repository
 
@@ -65,7 +66,9 @@ The `oh-*` plugins are installed once at user scope, switched off in user settin
 - **Astra can't post.** It runs `codex exec -s read-only`, so it can't post comments or call MCP tools. Post its report yourself, unchanged, under an "Astra high (Codex)" header.
 - **`codex exec` skips hooks you haven't trusted**, and Astra runs don't use `--dangerously-bypass-hook-trust`, so review briefs carry the rules they need.
 - **Codex's question tool works in Plan mode only by default.** To allow it in Default mode, run `codex features enable default_mode_request_user_input` (still marked under development in Codex 0.162.1).
-- **The waxseal guard is a backstop, not a sandbox.** It checks only what a shell would execute, fails open on input it can't handle, and needs `python3`.
+- **The guards are backstops, not sandboxes.** They check only what a shell would execute, fail open on input they can't handle, and need `python3`.
+- **The production guard can't see everything.** A port-forwarded production database looks like localhost, one named by a `pg_service.conf` entry isn't resolved, commands inside a double-quoted command substitution (`"$(...)"` or backticks) aren't read, and neither is a heredoc inside a quoted command string (`ssh vm 'psql <<EOF …'`); a kube context or database host named only in a variable set outside the command is treated as production and asks; interpreter code isn't read. The always-on rule covers those.
+- **Codex can't ask from a hook.** It logs an `ask` as a failed hook and runs the command, so in Codex the production guard refuses the cases it would ask about in Claude Code, and the agent hands you the command.
 - **After `codex plugin add oh-<name>@compound-v`**, that plugin's `enabled = true` comes back in `~/.codex/config.toml`. Switch it off again for your user.
 - **Cloud sessions load no plugins**, so each repository's `AGENTS.md` repeats the rules that must always hold: I merge, a PR is a release, every PR bumps the version.
 - **Any `mise exec` in a worktree with an untrusted `mise.toml` fails**, including `mise exec -- gh pr checks --watch`. Run `mise trust <worktree>/mise.toml` first, or run it from a directory without one.
@@ -80,6 +83,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.4.0: always-on *Production guard* rule and a PreToolUse guard (`hooks/prod-guard.py`) that refuses merging PRs, pushing to a default branch, force-pushing and deleting repositories, and asks before `kubectl delete`/`drain`/`cordon`/scale-to-zero on non-local contexts, `helm uninstall`, and destructive SQL on remote databases (deny in Codex). Both guards share `hooks/shell.py`.
 - oh 2.3.1: `pull-requests` follows the review loop's tiers and opens PRs as drafts before the first round; README rewritten around how I work, with gotchas.
 - oh 2.3.0: always-on *Sealed secrets go through waxseal* rule, plus a narrow PreToolUse guard (`hooks/waxseal-guard.py`) that refuses `kubeseal`, `gcloud secrets` changes and value reads, and Secret Manager URLs given to curl/wget, except inside waxseal's and oh's own source trees.
 - oh 2.2.0: always-on *Watch your pull requests* rule, with the commands in `pull-requests`: keep your open PRs mergeable and green, re-bump when the base moves, check before calling anything ready.
