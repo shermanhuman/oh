@@ -63,6 +63,8 @@ DENIED = [
 ALLOWED = [
     "waxseal --repo . --no-input --yes key add ns-app API_KEY --from-file -",
     "waxseal reseal default-app",
+    "waxseal --no-input key add sc-ghcr .dockerconfigjson --namespace sc --from-key default-ghcr/.dockerconfigjson",
+    "waxseal --no-input key set sc-ghcr .dockerconfigjson --from-key default-ghcr/.dockerconfigjson",
     "waxseal check metadata && waxseal check gsm",
     "openssl rand -base64 32 | waxseal key set default-app key --from-file -",
     "command -v kubeseal",
