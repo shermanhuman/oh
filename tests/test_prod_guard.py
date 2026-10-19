@@ -66,6 +66,7 @@ DENIED = [
     "gh api graphql --input=merge.json",
     "git push --repo origin HEAD:main",
     "git push --repo=origin +HEAD:feat/x",
+    "gh api repos/o/r/pulls/12/merge --input=merge.json",
 ]
 
 # Irreversible in production: the user approves each one.
@@ -151,6 +152,12 @@ ASKED = [
     "kubectl --context kind-dev delete ns x --context default",
     "kubectl scale deploy/x --context default --replicas=1 --replicas=0",
     "kubectl delete ns x --context default --dry-run=client --dry-run=none",
+    "kubectl delete ns x --context default --dry-run=false",
+    "echo 'set -e' > run2.sh; echo 'kubectl delete ns x --context default' >> run2.sh; bash run2.sh",
+    "echo '-- cleanup' > b.sql; echo 'DROP TABLE t;' >> b.sql; psql -h db.prod -f b.sql",
+    "psql -h db.prod -Atc 'DROP TABLE t'",
+    "psql -h db.prod -tc 'DELETE FROM t'",
+    "printf -- '%s\\n' 'DROP TABLE t;' | psql -h db.prod",
 ]
 
 # Everyday work, including the release routine, local clusters and local databases.
@@ -225,6 +232,8 @@ ALLOWED = [
     "kubectl --context default delete ns x --context kind-dev",
     "helm uninstall x --kube-context default --dry-run=true",
     "git push --repo origin feat/x",
+    "psql -h db.prod -Atc 'SELECT count(*) FROM t'",
+    "echo -n 'SELECT 1' | psql -h db.prod",
 ]
 
 

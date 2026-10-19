@@ -113,11 +113,12 @@ class Where:
 
 
 def options(args, *names):
-    """Every value given to these options: `--x v`, `--x=v`, and `-xv` for short ones."""
+    """Every value given to these options: `--x v`, `--x=v`, `-xv`, and a short one
+    ending a cluster (`-Atc v`)."""
     values = []
     for i, arg in enumerate(args):
         for name in names:
-            if arg == name and i + 1 < len(args):
+            if (arg == name or (len(name) == 2 and re.fullmatch(r"-[a-zA-Z]+" + name[1], arg))) and i + 1 < len(args):
                 values.append(args[i + 1])
             elif name.startswith("--") and arg.startswith(name + "="):
                 values.append(arg[len(name) + 1:])
@@ -219,7 +220,7 @@ def kubectl_finding(args, where, env):
     rest = args[i + 1:]
     # A bare --dry-run means client (`--dry-run none` makes "none" a resource name); the last one counts.
     dry = [arg.partition("=")[2] or "client" for arg in rest if arg == "--dry-run" or arg.startswith("--dry-run=")]
-    if dry and dry[-1] != "none":
+    if dry and dry[-1] not in ("none", "false", "0"):
         return None
     if verb in ("delete", "drain", "cordon"):
         action = verb
@@ -308,11 +309,11 @@ def gh_finding(args, where):
         return None
     endpoint = words[1].lstrip("/")
     fields = options(args, "-f", "--raw-field", "-F", "--field")
-    method = (option(args, "-X", "--method") or ("POST" if fields or "--input" in args else "GET")).upper()
+    request = option(args, "--input")
+    method = (option(args, "-X", "--method") or ("POST" if fields or request else "GET")).upper()
     if re.fullmatch(r"repos/[^/]+/[^/]+/pulls/[^/]+/merge", endpoint) and method in ("PUT", "POST"):
         return DENY, "merges a pull request"
     bodies = [(read(f.split("=@", 1)[1], where) or "") if "=@" in f else f for f in fields]
-    request = option(args, "--input")
     if request and request != "-":  # `--input -` reads stdin, checked where stdin is known
         bodies.append(read(request, where) or "")
     if endpoint == "graphql" and any(MERGE_MUTATION.search(body) for body in bodies):
@@ -482,6 +483,7 @@ def script(name, where):
 
 def printf(args):
     """printf's output for the common cases: escapes, %s and %b, the format reused until operands run out."""
+    args = args[1:] if args[:1] == ["--"] else args
     if not args:
         return ""
     unescape = lambda s: s.replace("\\n", "\n").replace("\\t", "\t")
@@ -507,7 +509,7 @@ def output(argv, where, stdin):
         return None
     name, args = os.path.basename(run[0]), run[1:]
     if name == "echo":
-        return " ".join(arg for arg in args if arg not in ("-n", "-e", "-E"))
+        return " ".join(arg for arg in args if arg not in ("-n", "-e", "-E")) + ("" if "-n" in args else "\n")
     if name == "printf":
         return printf(args)
     if name == "cat":
