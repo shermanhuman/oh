@@ -127,8 +127,9 @@ def options(args, *names):
 
 
 def option(args, *names):
+    """The value that takes effect: CLIs read the last of repeated flags."""
     values = options(args, *names)
-    return values[0] if values else None
+    return values[-1] if values else None
 
 
 def positionals(args, value_options):
@@ -216,7 +217,9 @@ def verb_of(args, value_options):
 def kubectl_finding(args, where, env):
     verb, i = verb_of(args, KUBECTL_VALUE_OPTIONS)
     rest = args[i + 1:]
-    if any(arg.startswith("--dry-run") and arg != "--dry-run=none" for arg in rest):
+    # A bare --dry-run means client (`--dry-run none` makes "none" a resource name); the last one counts.
+    dry = [arg.partition("=")[2] or "client" for arg in rest if arg == "--dry-run" or arg.startswith("--dry-run=")]
+    if dry and dry[-1] != "none":
         return None
     if verb in ("delete", "drain", "cordon"):
         action = verb
@@ -232,7 +235,8 @@ def kubectl_finding(args, where, env):
 
 def helm_finding(args, where, env):
     verb, i = verb_of(args, HELM_VALUE_OPTIONS)
-    if verb not in ("uninstall", "delete", "del", "un") or "--dry-run" in args[i + 1:]:
+    dry = [arg.partition("=")[2] or "true" for arg in args[i + 1:] if arg == "--dry-run" or arg.startswith("--dry-run=")]
+    if verb not in ("uninstall", "delete", "del", "un") or (dry and dry[-1].lower() in ("true", "1", "t")):
         return None
     context = kube_context(args, where, env, flag="--kube-context")
     if is_local(context):
@@ -269,7 +273,8 @@ def git_finding(args, where):
     if any(arg in ("--mirror", "--all", "--branches") for arg in flags):
         return DENY, "pushes every branch"
     words = positionals(rest, PUSH_VALUE_OPTIONS)
-    remote, refspecs = (words[0] if words else "origin"), words[1:]
+    named = option(rest, "--repo")
+    remote, refspecs = (named, words) if named else ((words[0] if words else "origin"), words[1:])
     if any(spec.startswith("+") for spec in refspecs):
         return DENY, "force-pushes"
     defaults = set(DEFAULT_BRANCHES)
@@ -307,6 +312,9 @@ def gh_finding(args, where):
     if re.fullmatch(r"repos/[^/]+/[^/]+/pulls/[^/]+/merge", endpoint) and method in ("PUT", "POST"):
         return DENY, "merges a pull request"
     bodies = [(read(f.split("=@", 1)[1], where) or "") if "=@" in f else f for f in fields]
+    request = option(args, "--input")
+    if request and request != "-":  # `--input -` reads stdin, checked where stdin is known
+        bodies.append(read(request, where) or "")
     if endpoint == "graphql" and any(MERGE_MUTATION.search(body) for body in bodies):
         return DENY, "merges a pull request"
     if method == "DELETE" and re.fullmatch(r"repos/[^/]+/[^/]+/?", endpoint):
@@ -334,16 +342,19 @@ def network_finding(args):
 
 
 def remote_host(args, env):
-    """True when psql's host, from flags, a connection string or PGHOST, isn't local."""
+    """True when psql's host, from flags, a connection string, PGHOST or PGHOSTADDR, isn't local.
+    A connection argument held in a variable (`psql "$DATABASE_URL"`) can't be resolved, so it counts."""
     hosts = options(args, "-h", "--host")
-    for arg in args:
+    for arg in options(args, "-d", "--dbname") + positionals(args, PSQL_VALUE_OPTIONS):
+        if "$" in arg:
+            return True
         uri = re.match(r"postgres(?:ql)?://(?:[^@/]*@)?([^/?]*)", arg)
         if uri:
             hosts.append(re.sub(r"(\]|^[^\[\]]*):\d+$", r"\1", uri.group(1)))
-            hosts += re.findall(r"[?&]host=([^&]+)", arg)
+            hosts += re.findall(r"[?&]host(?:addr)?=([^&]+)", arg)
         hosts += re.findall(r"(?:^|\s)host(?:addr)?=(\S+)", arg)
-    if not hosts and env.get("PGHOST"):
-        hosts = [env["PGHOST"]]
+    if not hosts:
+        hosts = [env[name] for name in ("PGHOST", "PGHOSTADDR") if env.get(name)]
     for value in hosts:
         for host in value.split(","):
             host = host.strip("[]")
@@ -352,17 +363,49 @@ def remote_host(args, env):
     return False
 
 
+def statements(sql):
+    """SQL split on semicolons, without comments, with string literals emptied to ''.
+    Quote-aware, so `'ok--'` isn't a comment and `';'` isn't a boundary."""
+    sql = "\n".join(line for line in sql.split("\n") if not line.lstrip().startswith("\\"))
+    out, current, i, n = [], [], 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if c == "'":
+            close = i + 1
+            while close < n and not (sql[close] == "'" and sql[close + 1:close + 2] != "'"):
+                close += 2 if sql[close:close + 2] == "''" else 1
+            current.append("''")
+            i = close + 1
+        elif c == '"':
+            close = sql.find('"', i + 1)
+            close = n if close < 0 else close
+            current.append(sql[i:close + 1])
+            i = close + 1
+        elif sql.startswith("--", i):
+            while i < n and sql[i] != "\n":
+                i += 1
+        elif sql.startswith("/*", i):
+            close = sql.find("*/", i + 2)
+            i = n if close < 0 else close + 2
+            current.append(" ")
+        elif c == ";":
+            out.append("".join(current))
+            current, i = [], i + 1
+        else:
+            current.append(c)
+            i += 1
+    out.append("".join(current))
+    return out
+
+
 def destructive(sql):
     """What makes this SQL irreversible, or None."""
-    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)
-    sql = "\n".join(line for line in sql.split("\n") if not line.lstrip().startswith("\\"))
-    sql = re.sub(r"--[^\n]*", " ", sql)
-    for statement in sql.split(";"):
+    for statement in statements(sql):
         s = " ".join(statement.split()).upper()
         start = re.match(r"(DROP|TRUNCATE)\b", s)
         if start:
             return start.group(1)
-        if re.match(r"ALTER\s+TABLE\b", s) and re.search(r"\bDROP\s+(?!CONSTRAINT|DEFAULT|NOT\b|IDENTITY|EXPRESSION)\w", s):
+        if re.match(r"ALTER\s+TABLE\b", s) and re.search(r"\bDROP\s+(?!CONSTRAINT|DEFAULT|NOT\b|IDENTITY|EXPRESSION)[\w\"]", s):
             return "ALTER TABLE ... DROP"
         delete = re.search(r"\bDELETE\s+FROM\b", s)
         if delete and not re.search(r"\bWHERE\b", s[delete.end():]):
@@ -412,7 +455,7 @@ def shell_consumer(argv, where):
         return None
     name, args = os.path.basename(run[0]), run[1:]
     if name in SHELLS and not any(re.fullmatch(r"-[a-z]*c[a-z]*", a) for a in args):
-        return where
+        return where.but(env={**where.env, **env})
     if name == "ssh":
         # stdin is a script only when the remote command is a shell reading it (`ssh vm`, `ssh vm bash -s`).
         inner = ssh_command(args)
@@ -437,6 +480,26 @@ def script(name, where):
     return shell_script(name, where.cwd)
 
 
+def printf(args):
+    """printf's output for the common cases: escapes, %s and %b, the format reused until operands run out."""
+    if not args:
+        return ""
+    unescape = lambda s: s.replace("\\n", "\n").replace("\\t", "\t")
+    parts = re.split(r"(%[-+ #0-9.]*[a-zA-Z%])", args[0])
+    operands, out = list(args[1:]), []
+    while True:
+        for k, part in enumerate(parts):
+            if k % 2 == 0:
+                out.append(unescape(part))
+            elif part == "%%":
+                out.append("%")
+            else:
+                value = operands.pop(0) if operands else ""
+                out.append(unescape(value) if part.endswith("b") else value)
+        if not operands or not any(p != "%%" for p in parts[1::2]):
+            return "".join(out)
+
+
 def output(argv, where, stdin):
     """What a command prints, when the guard can tell: echo, printf, cat, and tee passing stdin on."""
     run = program(argv)
@@ -446,7 +509,7 @@ def output(argv, where, stdin):
     if name == "echo":
         return " ".join(arg for arg in args if arg not in ("-n", "-e", "-E"))
     if name == "printf":
-        return " ".join(args).replace("\\n", "\n")
+        return printf(args)
     if name == "cat":
         files = [arg for arg in args if not arg.startswith("-")]
         return "\n".join(read(f, where) or "" for f in files) if files else stdin
@@ -480,26 +543,29 @@ def argv_findings(argv, where, depth):
     if not run:
         return
     name, args = os.path.basename(run[0]), run[1:]
+    # A child shell inherits the command's variables (`PGHOST=x bash -c ...`), and a
+    # script runs in the caller's directory, not its own.
+    child = where.but(env={**where.env, **env})
     if name in SHELLS:
         for i, flag in enumerate(args):
             if re.fullmatch(r"-[a-z]*c[a-z]*", flag) and i + 1 < len(args):
-                yield from findings(args[i + 1], where, depth + 1)
+                yield from findings(args[i + 1], child, depth + 1)
                 return
             if i > 0 and re.fullmatch(r"[-+][a-zA-Z]*[oO]", args[i - 1]):
                 continue
             if not flag.startswith(("-", "+")):
-                path, text = script(flag, where)
+                text = script(flag, where)[1]
                 if text:
-                    yield from findings(text, where.but(cwd=str(path.parent)), depth + 1)
+                    yield from findings(text, child, depth + 1)
                 return
         return
     if "/" in run[0]:
-        path, text = script(run[0], where)
+        text = script(run[0], where)[1]
         if text:
-            yield from findings(text, where.but(cwd=str(path.parent)), depth + 1)
+            yield from findings(text, child, depth + 1)
             return
     if name == "eval":
-        yield from findings(" ".join(args), where, depth + 1)
+        yield from findings(" ".join(args), child, depth + 1)
     elif name == "ssh":
         inner = ssh_command(args)
         if inner:
@@ -612,11 +678,14 @@ def findings(text, where, depth=0):
         # `cat > run.sh <<EOF`, `printf '...' > zap.sh`, `... | tee run.sh`.
         if printed is not None:
             for operator, target in redirects:
-                if operator in (">", ">>", ">|", "&>", "&>>"):
+                if operator in (">", ">|", "&>"):
                     here.files[here.path(target)] = printed
+                elif operator in (">>", "&>>"):
+                    here.files[here.path(target)] = (read(target, here) or "") + printed
             if os.path.basename(run[0]) == "tee":
+                append = any(arg in ("-a", "--append") for arg in run[1:])
                 for name in positionals(run[1:], set()):
-                    here.files[here.path(name)] = printed
+                    here.files[here.path(name)] = ((read(name, here) or "") if append else "") + printed
         if inputs and sql_consumer(argv, here):
             for sql in inputs:
                 yield sql_ask(sql)

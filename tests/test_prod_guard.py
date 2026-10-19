@@ -16,6 +16,7 @@ HOME = pathlib.Path(tempfile.mkdtemp(prefix="prod-guard-"))
 atexit.register(shutil.rmtree, HOME, ignore_errors=True)
 (HOME / "sql").mkdir()
 (HOME / "sql/drop.sql").write_text("DROP TABLE t;\n")
+(HOME / "merge.json").write_text("{\"query\": \"mutation { mergePullRequest(input: {pullRequestId: \\\"x\\\"}) { clientMutationId } }\"}\n")
 (HOME / "merge.graphql").write_text("mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }\n")
 (HOME / ".kube").mkdir()
 (HOME / ".kube/config").write_text("apiVersion: v1\ncontexts: []\n")
@@ -61,6 +62,10 @@ DENIED = [
     "xh PUT api.github.com/repos/o/r/pulls/12/merge",
     "printf 'gh pr merge 12\\n' > m.sh && bash m.sh",
     "out=`git push --force origin main`",
+    "gh api graphql --input merge.json",
+    "gh api graphql --input=merge.json",
+    "git push --repo origin HEAD:main",
+    "git push --repo=origin +HEAD:feat/x",
 ]
 
 # Irreversible in production: the user approves each one.
@@ -132,6 +137,20 @@ ASKED = [
     "ssh vm -t 'psql -h db.prod -c \"DROP TABLE t\"'",
     "x=`psql -h db.prod -c 'DROP TABLE t'`; echo $x",
     "echo `kubectl delete ns x --context default`",
+    "psql --dbname=postgresql://u@db.prod/app -c 'DROP TABLE t'",
+    "psql -d 'host=db.prod dbname=app' -c 'DROP TABLE t'",
+    "psql \"$DATABASE_URL\" -c 'DROP TABLE t'",
+    "PGHOSTADDR=10.0.0.5 psql -c 'DROP TABLE t'",
+    "PGHOST=db.prod bash -c \"psql -c 'DROP TABLE t'\"",
+    "psql -h db.prod -c 'ALTER TABLE users DROP \"legacyId\"'",
+    "psql -h db.prod -c \"SELECT 'ok--'; DROP TABLE t;\"",
+    "printf '%s\\n' 'DROP TABLE t;' | psql -h db.prod",
+    "printf '%s;\\n' 'SELECT 1' 'DROP TABLE b' | psql -h db.prod",
+    "echo 'DROP TABLE t;' > c2.sql; echo 'SELECT 1;' >> c2.sql; psql -h db.prod -f c2.sql",
+    "echo 'DROP TABLE t;' | tee c3.sql; echo 'SELECT 1;' | tee -a c3.sql; psql -h db.prod -f c3.sql",
+    "kubectl --context kind-dev delete ns x --context default",
+    "kubectl scale deploy/x --context default --replicas=1 --replicas=0",
+    "kubectl delete ns x --context default --dry-run=client --dry-run=none",
 ]
 
 # Everyday work, including the release routine, local clusters and local databases.
@@ -195,6 +214,17 @@ ALLOWED = [
     "cat <<'EOF' | ssh vm 'cat >> notes.txt'\nkubectl delete ns x\nEOF",
     "echo 'kubectl delete ns x' | ssh vm 'tee -a log.txt'",
     "cat <<'EOF' | tee notes.md\nkubectl delete ns x --context default\nEOF",
+    "psql -h db.prod -c \"SELECT 'DROP TABLE t; --'\"",
+    "psql -h db.prod -c \"UPDATE t SET note = 'x; DELETE FROM y' WHERE id = 1\"",
+    "psql -h db.prod -c 'ALTER TABLE t DROP CONSTRAINT \"t_pkey\"'",
+    "psql app -c 'DROP TABLE t'",
+    "psql --dbname=postgresql://u@localhost/app -c 'DROP TABLE t'",
+    "printf '%s\\n' 'SELECT 1;' | psql -h db.prod",
+    "echo 'SELECT 1;' > c4.sql; echo 'DROP TABLE t;' > c4.sql; echo 'SELECT 2;' > c4.sql; psql -h db.prod -f c4.sql",
+    "kubectl delete ns x --context default --dry-run none",
+    "kubectl --context default delete ns x --context kind-dev",
+    "helm uninstall x --kube-context default --dry-run=true",
+    "git push --repo origin feat/x",
 ]
 
 
