@@ -1,6 +1,6 @@
 ---
 name: release
-description: Prepares a version bump or release from the repository's actual version source (plugin.json, mix.exs, VERSION, tags) and publishes only when asked. Use when bumping a version, preparing a PR's version change, or when the user asks to tag, release or publish.
+description: Prepares a version bump or release from the repository's actual version source (plugin.json, mix.exs, Cargo.toml, go.mod, VERSION, tags) and publishes only when asked. Use when bumping a version, preparing a PR's version change, or when the user asks to tag, release or publish.
 ---
 
 # Version and release preparation
@@ -13,7 +13,7 @@ Inspect `.claude-plugin/plugin.json` (and `plugins/*/.claude-plugin/plugin.json`
 
 - Plugins (Claude Code / Codex): update `version` in each changed plugin's `.claude-plugin/plugin.json`; a repository holding several plugins bumps each one it changed. Installed copies only update when that string changes, and the version-check workflow requires a strictly greater semver than the PR base. No tag is needed. A conventional bump commit is `chore: bump X.Y.Z → X.Y.Z+1`, or include the bump in the scoped feature commit.
 - Elixir: update the actual application version in `mix.exs` or its configured source.
-- Rust: update `version` under `[package]`, or under `[workspace.package]` when members inherit it (`version.workspace = true`); then build once so `Cargo.lock` picks up the new version, and commit both. `rust-version` is the toolchain floor, not the product version.
+- Rust: update `version` under `[package]`, or under `[workspace.package]` when members inherit it (`version.workspace = true`); `rust-version` is the toolchain floor, not the product version.
 - Go: `go.mod`'s Go directive is not the product version. Honor `VERSION` or equivalent when present; otherwise inspect tag/build-flag conventions. With tag-only versioning, record the intended version in the PR instead of creating a publishing tag for a bump-only task.
 
 Use the requested semver level. Without one, infer patch for fixes, minor for compatible features, and major for breaking changes, subject to the project's pre-1.0 policy. Compare with the PR base and existing edits to avoid multiple bumps for the same PR. Do not reset a larger intentional bump.
@@ -22,7 +22,7 @@ Use the requested semver level. Without one, infer patch for fixes, minor for co
 
 1. Inspect `git status --short`, the current feature branch, the PR base, and the current version source. Keep unrelated edits intact: a dirty tree is normal during feature preparation, not a reason to discard changes or force a clean-tree approval. Work on the appropriate feature branch; do not switch to main just to bump a version.
 2. Compute the requested semver bump (when preparing a PR, do this after the work is tested and reviewed, as the `oh:pull-requests` skill orders it): major `X+1.0.0`, minor `X.Y+1.0`, patch `X.Y.Z+1`. For PR preparation, a version already increased appropriately over the base is sufficient.
-3. Edit the plugin manifest's `version`, `mix.exs`'s application version, `VERSION`, or the repository's actual authoritative source; synchronize required copies.
+3. Edit the plugin manifest's `version`, `mix.exs`'s application version, `VERSION`, or the repository's actual authoritative source; synchronize required copies. Rust: then run `mise exec -- cargo update --workspace` so `Cargo.lock` records the new version, and commit it with `Cargo.toml`.
 4. Validate: Rust uses `mise exec -- cargo test --workspace --locked`; Go uses `mise exec -- go test ./...`; Elixir uses `mise exec -- mix precommit` when defined, otherwise `mise exec -- mix test` and `mise exec -- mix compile --warnings-as-errors`. For a plugin, run `claude plugin validate <plugin dir>` (and the marketplace folder, if it changed), and check skill frontmatter and resource links. Run configured repository checks too, and reuse already-valid checks when no affected code changed. If a required check is unavailable, report the exact blocker instead of claiming it passed.
 5. For a bump-only request, stop here and report the old/new version and changed files. For a requested PR, follow the `oh:pull-requests` skill; do not tag in this step.
 

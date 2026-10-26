@@ -83,6 +83,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.5.0: the *Version bumps* rule and the `release` skill cover Rust: `Cargo.toml`, workspace version inheritance, refreshing `Cargo.lock`, and `--locked` validation.
 - oh 2.4.1: the `waxseal` skill covers waxseal 0.6: `--from-key` copies a value waxseal already stores (another namespace, a new key name) instead of a stop-and-ask, plus the fixed-shape keyring recipe. The always-on rule lists `--from-key` as a value source.
 - oh 2.4.0: always-on *Production guard* rule and a PreToolUse guard (`hooks/prod-guard.py`) that refuses merging PRs, pushing to a default branch, force-pushing and deleting repositories, and asks before `kubectl delete`/`drain`/`cordon`/scale-to-zero on non-local contexts, `helm uninstall`, and destructive SQL on remote databases (deny in Codex). Both guards share `hooks/shell.py`.
 - oh 2.3.1: `pull-requests` follows the review loop's tiers and opens PRs as drafts before the first round; README rewritten around how I work, with gotchas.
