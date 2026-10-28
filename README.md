@@ -23,7 +23,7 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 Compound V's [workflow](https://github.com/shermanhuman/compound-v#the-workflow) is the frame: pick, plan, review the plan, interrogate, build in a worktree, run the review loop, merge, file follow-ups. Oh adds my choices and the reasons for them:
 
 - **Mise first.** Every tool comes from mise, and runs through `mise exec` when the shell isn't activated, so nothing gets installed twice in different ways.
-- **A pull request is a release.** I keep one open PR per repository, batch the work, and test it locally before it opens. PRs stay drafts until I could merge them right now: last review round clean, based on the default branch, mergeable and green. A PR that stops meeting that goes back to draft, and I merge.
+- **A pull request is a release.** I keep one open PR per repository, batch the work, and test it locally before it opens. PRs stay drafts until I could merge them right now: last review round clean, based on the default branch, up to date, mergeable and green. A PR that stops meeting that goes back to draft. I merge.
 - **Worktrees, always.** My main checkouts run dev servers and sometimes hold another session's branch.
 - **Watch your own PRs.** After every push, the agent watches CI and mergeability, because I kept being the one who found the red check or the conflict.
 - **A version bump in every PR, done last.** It's re-applied when the base moves, because two PRs that set the same version line merge cleanly and then fail CI.
@@ -83,7 +83,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
-- oh 2.6.0: a PR leaves draft only when the user could merge it right now (based on the default branch, mergeable, up to date, green, review clean, bump landed); stacked PRs stay drafts until retargeted, and a ready PR that stops qualifying goes back to draft. Added to *Watch your pull requests* and the `pull-requests` skill.
+- oh 2.6.0: a PR leaves draft only when the user could merge it right now (based on the default branch, mergeable, up to date, green, review clean, bump landed); stacked PRs stay drafts until retargeted, and a ready PR that stops qualifying (the base moved, or a check went red) goes back to draft. Added to *Watch your pull requests* and the `pull-requests` skill.
 - oh 2.5.0: the *Version bumps* rule and the `release` skill cover Rust: `Cargo.toml`, workspace version inheritance, refreshing `Cargo.lock`, and `--locked` validation.
 - oh 2.4.1: the `waxseal` skill covers waxseal 0.6: `--from-key` copies a value waxseal already stores (another namespace, a new key name) instead of a stop-and-ask, plus the fixed-shape keyring recipe. The always-on rule lists `--from-key` as a value source.
 - oh 2.4.0: always-on *Production guard* rule and a PreToolUse guard (`hooks/prod-guard.py`) that refuses merging PRs, pushing to a default branch, force-pushing and deleting repositories, and asks before `kubectl delete`/`drain`/`cordon`/scale-to-zero on non-local contexts, `helm uninstall`, and destructive SQL on remote databases (deny in Codex). Both guards share `hooks/shell.py`.
