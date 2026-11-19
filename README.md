@@ -29,7 +29,8 @@ Compound V's [workflow](https://github.com/shermanhuman/compound-v#the-workflow)
 - **A version bump in every PR, done last.** It's re-applied when the base moves, because two PRs that set the same version line merge cleanly and then fail CI.
 - **Sealed secrets only through waxseal**, one visible command per call, with a guard hook that refuses `kubeseal`, `gcloud secrets` changes and value reads, and Secret Manager URLs (details in the `oh:waxseal` skill and the hook text).
 - **A production guard instead of a sandbox.** I run Claude Code with `--dangerously-skip-permissions` so it never stops to ask while coding. A guard hook refuses what is always mine (merging, pushing to a default branch, force-pushing, deleting a repository) and asks me before irreversible production actions (deletes, drains and scale-to-zero on a non-local cluster, `helm uninstall`, destructive SQL on a remote database). The release routine never prompts.
-- **Questions carry their own context**, because text above a question widget goes unread.
+- **Questions come as one packet.** The agent researches first, then asks everything at once with the options shown and its recommendation pre-filled, and every decision has a More discussion option. Release reviews and other walkthroughs work the same way. One question after another wasted my time.
+- **Rough edges get logged** on [Applesauce-Labs/factory#8](https://github.com/Applesauce-Labs/factory/issues/8), in a fixed first line a script can read, so the factory's improvement loop has data.
 - **Reviewers:** Fable at high effort for review subagents, and Astra high through `codex exec` as the second voice.
 - **`/next` without the prefix.** A one-line personal skill at `~/.claude/skills/next/SKILL.md` ("Use the `compound-v:next` skill with: $ARGUMENTS") lets me type `/next` instead of `/compound-v:next` in Claude Code. A plugin can't add a bare command, so it lives only on my machine; in Codex it's still `$compound-v:next`.
 
@@ -83,6 +84,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.7.0: *Questions* come as one decision packet (with `compound-v:interrogate` 2.6.0): research first, everything at once, show don't tell, More discussion on every decision, walkthroughs too. New *Rough edges* rule logs improvement signals on factory#8.
 - oh 2.6.0: a PR leaves draft only when the user could merge it right now (based on the default branch, mergeable, up to date, green, review clean, bump landed); stacked PRs stay drafts until retargeted, and a ready PR that stops qualifying (the base moved, or a check went red) goes back to draft. Added to *Watch your pull requests* and the `pull-requests` skill.
 - oh 2.5.0: the *Version bumps* rule and the `release` skill cover Rust: `Cargo.toml`, workspace version inheritance, refreshing `Cargo.lock`, and `--locked` validation.
 - oh 2.4.1: the `waxseal` skill covers waxseal 0.6: `--from-key` copies a value waxseal already stores (another namespace, a new key name) instead of a stop-and-ask, plus the fixed-shape keyring recipe. The always-on rule lists `--from-key` as a value source.
