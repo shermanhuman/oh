@@ -36,15 +36,16 @@ Compound V's [workflow](https://github.com/shermanhuman/compound-v#the-workflow)
 
 ## Install
 
-The plugins are listed in the Compound V marketplace (this repository has none of its own, so nothing gets installed twice). `oh` builds on Compound V, so install that too.
+The plugins are listed in this repository's own marketplace, `oh` (the repository is private, so installing needs read access: an SSH key GitHub accepts, or `gh auth login` plus `gh auth setup-git`). `oh` builds on Compound V, so install that too.
 
 Claude Code:
 
 ```bash
 claude plugin marketplace add shermanhuman/compound-v
 claude plugin install compound-v@compound-v
-claude plugin install oh@compound-v
-claude plugin install oh-phoenix@compound-v
+claude plugin marketplace add https://github.com/shermanhuman/oh.git
+claude plugin install oh@oh
+claude plugin install oh-phoenix@oh
 ```
 
 Codex:
@@ -52,11 +53,14 @@ Codex:
 ```bash
 codex plugin marketplace add shermanhuman/compound-v
 codex plugin add compound-v@compound-v
-codex plugin add oh@compound-v
-codex plugin add oh-phoenix@compound-v
+codex plugin marketplace add https://github.com/shermanhuman/oh.git
+codex plugin add oh@oh
+codex plugin add oh-phoenix@oh
 ```
 
-Install the other `oh-*` plugins the same way. Start a new Claude Code session (or run `/reload-plugins`). In Codex, open `/hooks` and trust oh's three hooks (the session-start rules, the waxseal guard and the production guard) and Compound V's. Trust is per hook definition, so an update that changes `hooks.json` asks again. Updating works as in [Compound V's README](https://github.com/shermanhuman/compound-v#updating): in Claude Code, auto-update or `claude plugin update oh@compound-v`; in Codex, `codex plugin add oh@compound-v`.
+Moving from the old `oh@compound-v` install: uninstall it (`claude plugin uninstall oh@compound-v`, `codex plugin remove oh@compound-v`) before installing `oh@oh`, so the plugin isn't loaded twice.
+
+Install the other `oh-*` plugins the same way. Start a new Claude Code session (or run `/reload-plugins`). In Codex, open `/hooks` and trust oh's four hooks (the session-start rules and the waxseal, production and agent guards) and Compound V's. Trust is per hook definition, so an update that changes `hooks.json` asks again. To update: in Claude Code, `claude plugin marketplace update oh` and `claude plugin update oh@oh`; in Codex, `codex plugin marketplace upgrade oh` and `codex plugin add oh@oh`.
 
 ## Stack and API plugins per repository
 
@@ -84,6 +88,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.8.0: oh has its own (private) marketplace. A new agent guard refuses pattern kills (`pkill`, `killall`, `pgrep | kill`) and printing secret files. Rules for cleaning up after a merge, flaky checks, not loosening permissions, no silent failures, no AI attribution lines and direct links; the second voice covers the instructions review tier and gets live web search (its command moved into `pull-requests`); `build-hooks.py` fails past a 9,500-character session-start budget; waxseal hand-off rules.
 - oh 2.7.1: decision packets use a local page served on 127.0.0.1, not claude.ai artifacts.
 - oh 2.7.0: *Questions* come as one decision packet on a web page (with `compound-v:interrogate` 2.6.0): research first, everything at once, show don't tell, More discussion on every decision, walkthroughs too. New *Rough edges* rule logs improvement signals on factory#8.
 - oh 2.6.0: a PR leaves draft only when the user could merge it right now (based on the default branch, mergeable, up to date, green, review clean, bump landed); stacked PRs stay drafts until retargeted, and a ready PR that stops qualifying (the base moved, or a check went red) goes back to draft. Added to *Watch your pull requests* and the `pull-requests` skill.

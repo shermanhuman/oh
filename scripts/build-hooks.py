@@ -1,12 +1,15 @@
 """Build each plugin's hooks/session-start.json from its hooks/always-on.md.
 
-Run after editing an always-on.md; `--check` fails when any JSON is stale.
+Run after editing an always-on.md; `--check` fails when any JSON is stale. Both
+fail when a plugin's session-start text passes BUDGET characters: Claude Code
+replaces hook context over 10,000 characters with a short preview.
 """
 import json
 import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+BUDGET = 9_500
 
 
 def render(source: pathlib.Path) -> str:
@@ -21,10 +24,14 @@ def render(source: pathlib.Path) -> str:
 
 if __name__ == "__main__":
     check = "--check" in sys.argv
-    stale = []
+    stale, over = [], []
     for source in sorted(ROOT.glob("plugins/*/hooks/always-on.md")):
         target = source.with_name("session-start.json")
         expected = render(source)
+        size = len(json.loads(expected)["hookSpecificOutput"]["additionalContext"])
+        print(f"{source.relative_to(ROOT)}: {size} of {BUDGET} characters")
+        if size > BUDGET:
+            over.append(f"{source.relative_to(ROOT)} ({size})")
         if check:
             actual = target.read_text(encoding="utf-8") if target.exists() else ""
             if actual != expected:
@@ -32,6 +39,8 @@ if __name__ == "__main__":
         else:
             target.write_text(expected, encoding="utf-8")
             print(f"wrote {target.relative_to(ROOT)}")
+    if over:
+        sys.exit(f"over the {BUDGET}-character session-start budget: " + ", ".join(over))
     if stale:
         sys.exit("stale, run python3 scripts/build-hooks.py: " + ", ".join(stale))
     if check:
