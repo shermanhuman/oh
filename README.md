@@ -84,6 +84,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.7.1: decision packets use a local page served on 127.0.0.1, not claude.ai artifacts.
 - oh 2.7.0: *Questions* come as one decision packet on a web page (with `compound-v:interrogate` 2.6.0): research first, everything at once, show don't tell, More discussion on every decision, walkthroughs too. New *Rough edges* rule logs improvement signals on factory#8.
 - oh 2.6.0: a PR leaves draft only when the user could merge it right now (based on the default branch, mergeable, up to date, green, review clean, bump landed); stacked PRs stay drafts until retargeted, and a ready PR that stops qualifying (the base moved, or a check went red) goes back to draft. Added to *Watch your pull requests* and the `pull-requests` skill.
 - oh 2.5.0: the *Version bumps* rule and the `release` skill cover Rust: `Cargo.toml`, workspace version inheritance, refreshing `Cargo.lock`, and `--locked` validation.
