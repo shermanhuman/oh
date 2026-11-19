@@ -1,6 +1,6 @@
 ---
 name: pull-requests
-description: Step-by-step procedure for preparing, opening and updating a pull request where every PR is a release - worktree setup, local tests and end-to-end checks, the review loop, the version bump, gh pr create, what goes in the PR description, and keeping it mergeable and green until it merges. Use before opening a PR, when pushing more commits to an open PR, when a PR has conflicts or failing checks, before saying a PR is ready to merge, when running or posting a review round, or when the user asks to ship, open or update a PR.
+description: Step-by-step procedure for preparing, opening and updating a pull request where every PR is a release - worktree setup, local tests and end-to-end checks, the review loop, the version bump, gh pr create, what goes in the PR description, and keeping it mergeable and green until it merges. Use before opening a PR, when pushing more commits to an open PR, when a PR has conflicts or failing checks, before saying a PR is ready to merge, when running or posting a review round (including the second-voice Astra review of a PR or plan), after a PR merges, or when the user asks to ship, open or update a PR.
 ---
 
 # Pull request procedure
@@ -65,6 +65,8 @@ codex exec -m gpt-6-astra -c model_reasoning_effort=high -c web_search="live" -s
 
 Tell Astra which skill to use (`compound-v:review`, `compound-v:followup` or `compound-v:plan-review`), the diff range or plan, a finding-ID prefix, and the facts already verified; paste in what its sandbox can't reach (private issues, the rough-edge log). Its sandbox can't post or call MCP tools, so post its report on the PR or issue yourself, unchanged, under an "Astra high (Codex)" header. Don't add `--dangerously-bypass-hook-trust`. If Codex fails or is unavailable, fall back as the review loop says and note it on the PR.
 
+When you are the Codex session: a fresh reviewer is a separate background `codex exec` with the brief on stdin, and the second voice is Claude, with web access so it can check current practice: `claude -p --model fable --allowedTools "WebSearch,WebFetch" < brief.md`. Without Claude installed, fall back as the review loop says.
+
 ## Merging
 
 Merging is the user's step, because each merge starts a release. Creating branches, pushing feature branches and creating or updating PRs are yours. Don't merge or squash-merge a PR and don't push to the default branch; when the PR is ready, ask the user to merge.
@@ -74,4 +76,4 @@ Merging is the user's step, because each merge starts a release. Creating branch
 Clean up yourself; don't tell the user "you can delete":
 - Confirm the branch is contained in the default branch, then delete it locally and on the remote (if the repository doesn't auto-delete), and remove its worktree and any review clones or scratch build trees. Move out anything still in use first. Never delete the default branch.
 - Close the issues the PR finished (plans, research requests, follow-up items) with a short comment linking the PR or merge commit; `Closes #N` covers some, so check what it missed. Say which related issues stay open and why.
-- For a plugin, update every install: `claude plugin marketplace update <marketplace>` and `claude plugin update <plugin>@<marketplace>` on each machine, then `codex plugin marketplace upgrade <marketplace>` and `codex plugin add <plugin>@<marketplace>` (the upgrade alone doesn't fetch a plugin changed only in its own repository). Confirm the versions.
+- For a plugin, update every install: `claude plugin marketplace update <marketplace>` and `claude plugin update <plugin>@<marketplace>`, then `codex plugin marketplace upgrade <marketplace>` and `codex plugin add <plugin>@<marketplace>` (the upgrade alone doesn't fetch a plugin changed only in its own repository). Do this on this machine and, over ssh, on every other session host by its alias (each host's `~/.ssh/config` names the others by Tailscale IP); list any host you can't reach. Confirm the versions.

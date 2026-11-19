@@ -1,8 +1,9 @@
 """Build each plugin's hooks/session-start.json from its hooks/always-on.md.
 
 Run after editing an always-on.md; `--check` fails when any JSON is stale. Both
-fail when a plugin's session-start text passes BUDGET characters: Claude Code
-replaces hook context over 10,000 characters with a short preview.
+fail when a plugin's session-start text passes BUDGET characters or bytes:
+Claude Code replaces hook context over 10,000 characters with a short preview,
+and Codex spills it past about 2,500 tokens (UTF-8 bytes / 4, so 10,000 bytes).
 """
 import json
 import pathlib
@@ -28,8 +29,9 @@ if __name__ == "__main__":
     for source in sorted(ROOT.glob("plugins/*/hooks/always-on.md")):
         target = source.with_name("session-start.json")
         expected = render(source)
-        size = len(json.loads(expected)["hookSpecificOutput"]["additionalContext"])
-        print(f"{source.relative_to(ROOT)}: {size} of {BUDGET} characters")
+        text = json.loads(expected)["hookSpecificOutput"]["additionalContext"]
+        size = max(len(text), len(text.encode("utf-8")))
+        print(f"{source.relative_to(ROOT)}: {size} of {BUDGET} (characters or UTF-8 bytes, whichever is larger)")
         if size > BUDGET:
             over.append(f"{source.relative_to(ROOT)} ({size})")
         if check:
