@@ -1,6 +1,6 @@
 ---
 name: pull-requests
-description: Step-by-step procedure for preparing, opening and updating a pull request where every PR is a release - worktree setup, local tests and end-to-end checks, the review loop, the version bump, gh pr create, what goes in the PR description, and keeping it mergeable and green until it merges. Use before opening a PR, when pushing more commits to an open PR, when a PR has conflicts or failing checks, before saying a PR is ready to merge, when running or posting a review round, or when the user asks to ship, open or update a PR.
+description: Step-by-step procedure for preparing, opening and updating a pull request where every PR is a release - worktree setup, local tests and end-to-end checks, the review loop, the version bump, gh pr create, what goes in the PR description, and keeping it mergeable and green until it merges. Use before opening a PR, when pushing more commits to an open PR, when a PR has conflicts or failing checks, before saying a PR is ready to merge, when running or posting a review round (including the second-voice Astra review of a PR or plan), after a PR merges, or when the user asks to ship, open or update a PR.
 ---
 
 # Pull request procedure
@@ -27,7 +27,7 @@ The always-on *Pull requests are releases* section of the `oh` hook sets the pol
    `--no-track` keeps the new branch from tracking the default branch, so a later `git push -u origin <branch>` sets the right upstream and status never compares against the default branch. To continue your open PR, add a worktree on that PR's branch instead (`git fetch`, then `git worktree add <path> <branch>`). Build, test and review there. The main checkout may hold someone else's changes or run their dev servers, so don't make PR changes in it; reading code there, or running a command the user asked for, is fine. Keep one worktree per batch of work, merge the default branch into it when it moves (merge, don't rebase), and remove the worktree once the PR has merged.
 2. **Build and test locally first.** Run the full test suites the way CI runs them (every configuration CI covers, such as each database or locale variant), the formatter check and a warnings-as-errors compile where the language has one. A failure that also fails on the default branch has to be shown failing there, not assumed.
 3. **Check user-facing changes end to end, locally.** When the repository has a local end-to-end setup (for example a browser test rig), run a scenario for every user-facing change and record what passed. For each key check, show once that it can fail: break the condition it checks (or invert the assertion), see it fail, then restore it. A check that has never failed may not be checking anything. When the repository has no end-to-end setup, say so in the PR and describe the manual check you ran instead.
-4. **Open a draft, then review.** Once local tests pass, open the PR as a draft (*Opening the PR*), so each review round is posted on it as it lands. Run `compound-v:review-loop` on the full diff against the default branch, at the tier it picks (light for prose-only diffs, full for everything else, including agent-instruction files); the rounds for each tier are defined there. Keep the decisions table from the plan (or start one) in the PR body or a file the reviewers read. Before opening, remove any debug output, temporary logging and stray TODOs you added. Mark the PR ready (`mise exec -- gh pr ready <n>`) only when the user could merge it right now: the loop's final round has no must-fix findings, the bump has landed, its base is the default branch, and it is mergeable, up to date and green (*Keeping it mergeable and green*).
+4. **Open a draft, then review.** Once local tests pass, open the PR as a draft (*Opening the PR*), so each review round is posted on it as it lands. Run `compound-v:review-loop` on the full diff against the default branch, at the tier it picks; the tiers and their rounds are defined there. Keep the decisions table from the plan (or start one) in the PR body or a file the reviewers read. Before opening, remove any debug output, temporary logging and stray TODOs you added. Mark the PR ready (`mise exec -- gh pr ready <n>`) only when the user could merge it right now: the loop's final round has no must-fix findings, the bump has landed, its base is the default branch, and it is mergeable, up to date and green (*Keeping it mergeable and green*).
 5. **Bump the version last,** using the `oh:release` skill and the hook's *Version bumps* section, once the work is tested and reviewed. An adequate bump already in this PR satisfies it. Take the number from the PR base when you bump, not from when the work started. If another PR merges first and the base reaches or passes your version, re-apply the same bump level to the base's version (a minor PR stays a minor bump).
 
 ## Opening the PR
@@ -57,6 +57,23 @@ Until the user merges it, the PR's state is yours to watch:
 
 `compound-v:review-loop` records every round on the PR: each review as a comment, then a fix-notes comment answering each finding by ID with the fix's commit SHA or the evidence. A round that ran before the PR existed is posted when it opens. If you have no GitHub access from this host, put the reviews and the finding-by-finding outcome in your report to the user instead, and say they aren't on the PR yet.
 
+**The second voice (Astra).** Wherever the review loop calls for one, and for any "Astra" review the user asks for, run Astra high through Codex in the background with the brief on stdin:
+
+```bash
+codex exec -m gpt-6-astra -c model_reasoning_effort=high -c web_search="live" -s read-only --skip-git-repo-check -C <dir> -o <out.md> - < brief.md
+```
+
+Tell Astra which skill to use (`compound-v:review`, `compound-v:followup` or `compound-v:plan-review`), the diff range or plan, a finding-ID prefix, and the facts already verified; paste in what its sandbox can't reach (private issues, the rough-edge log). Its sandbox can't post or call MCP tools, so post its report on the PR or issue yourself, unchanged, under an "Astra high (Codex)" header. Don't add `--dangerously-bypass-hook-trust`. If Codex fails or is unavailable, fall back as the review loop says and note it on the PR.
+
+When you are the Codex session: a fresh reviewer is a separate background `codex exec` with the brief on stdin, and the second voice is Claude, with web access so it can check current practice: `claude -p --model fable --allowedTools "WebSearch,WebFetch" < brief.md`. Without Claude installed, fall back as the review loop says.
+
 ## Merging
 
 Merging is the user's step, because each merge starts a release. Creating branches, pushing feature branches and creating or updating PRs are yours. Don't merge or squash-merge a PR and don't push to the default branch; when the PR is ready, ask the user to merge.
+
+## After the merge
+
+Clean up yourself; don't tell the user "you can delete":
+- Confirm the branch is contained in the default branch, then delete it locally and on the remote (if the repository doesn't auto-delete), and remove its worktree and any review clones or scratch build trees. Move out anything still in use first. Never delete the default branch.
+- Close the issues the PR finished (plans, research requests, follow-up items) with a short comment linking the PR or merge commit; `Closes #N` covers some, so check what it missed. Say which related issues stay open and why.
+- For a plugin, update every install: `claude plugin marketplace update <marketplace>` and `claude plugin update <plugin>@<marketplace>`, then `codex plugin marketplace upgrade <marketplace>` and `codex plugin add <plugin>@<marketplace>` (the upgrade alone doesn't fetch a plugin changed only in its own repository). Do this on this machine and, over ssh, on every other session host by its alias (each host's `~/.ssh/config` names the others by Tailscale IP); list any host you can't reach. Confirm the versions.

@@ -36,15 +36,16 @@ Compound V's [workflow](https://github.com/shermanhuman/compound-v#the-workflow)
 
 ## Install
 
-The plugins are listed in the Compound V marketplace (this repository has none of its own, so nothing gets installed twice). `oh` builds on Compound V, so install that too.
+The plugins are listed in this repository's own marketplace, `mapleset` (the repository is private, so installing needs read access: with the `shermanhuman/oh` form, an SSH key GitHub accepts, or else `gh auth login` plus `gh auth setup-git` for HTTPS). `oh` builds on Compound V, so install that too.
 
 Claude Code:
 
 ```bash
 claude plugin marketplace add shermanhuman/compound-v
 claude plugin install compound-v@compound-v
-claude plugin install oh@compound-v
-claude plugin install oh-phoenix@compound-v
+claude plugin marketplace add shermanhuman/oh
+claude plugin install oh@mapleset
+claude plugin install oh-phoenix@mapleset
 ```
 
 Codex:
@@ -52,11 +53,14 @@ Codex:
 ```bash
 codex plugin marketplace add shermanhuman/compound-v
 codex plugin add compound-v@compound-v
-codex plugin add oh@compound-v
-codex plugin add oh-phoenix@compound-v
+codex plugin marketplace add shermanhuman/oh
+codex plugin add oh@mapleset
+codex plugin add oh-phoenix@mapleset
 ```
 
-Install the other `oh-*` plugins the same way. Start a new Claude Code session (or run `/reload-plugins`). In Codex, open `/hooks` and trust oh's three hooks (the session-start rules, the waxseal guard and the production guard) and Compound V's. Trust is per hook definition, so an update that changes `hooks.json` asks again. Updating works as in [Compound V's README](https://github.com/shermanhuman/compound-v#updating): in Claude Code, auto-update or `claude plugin update oh@compound-v`; in Codex, `codex plugin add oh@compound-v`.
+Moving from the old `@compound-v` installs: uninstall each one (`claude plugin uninstall oh@compound-v`, `codex plugin remove oh@compound-v`, and the same for any `oh-*`) before installing `@mapleset`, so a plugin isn't loaded twice. Repositories that enable `oh-*@compound-v` in a committed `.claude/settings.json` or `.codex/config.toml` (breakdown-admin, breakdown-rosearch, breakdown-sales, breakdown-sites, supportcannon) switch to `oh-*@mapleset` and declare the `mapleset` marketplace before Compound V stops listing the oh plugins.
+
+Install the other `oh-*` plugins the same way. Start a new Claude Code session (or run `/reload-plugins`). In Codex, open `/hooks` and trust oh's four hooks (the session-start rules and the waxseal, production, and process and secrets guards) and Compound V's. Trust is per hook definition, so an update that changes `hooks.json` asks again. To update: in Claude Code, `claude plugin marketplace update mapleset` and `claude plugin update oh@mapleset`; in Codex, `codex plugin marketplace upgrade mapleset` and `codex plugin add oh@mapleset`.
 
 ## Stack and API plugins per repository
 
@@ -64,13 +68,14 @@ The `oh-*` plugins are installed once at user scope, switched off in user settin
 
 ## Gotchas
 
+- **The process and secrets guard reads shell commands only.** It doesn't see the Read tool, interpreter code, commands run on another machine over ssh, a file reached through `cd dir && cat name` when only the directory marks it secret, globs (`cat .env*`), text inside a double-quoted `"$(…)"`, a script written by heredoc and then run, PIDs passed through a file (`ps … | grep … > pids; for p in $(cat pids); do kill $p; done`), lookups in process substitution (`done < <(pgrep …)`) or in a `{ …; }` group piped to `xargs kill`. The always-on rule covers those.
 - **Astra can't post.** It runs `codex exec -s read-only`, so it can't post comments or call MCP tools. Post its report yourself, unchanged, under an "Astra high (Codex)" header.
 - **`codex exec` skips hooks you haven't trusted**, and Astra runs don't use `--dangerously-bypass-hook-trust`, so review briefs carry the rules they need.
 - **Codex's question tool works in Plan mode only by default.** To allow it in Default mode, run `codex features enable default_mode_request_user_input` (still marked under development in Codex 0.162.1).
 - **The guards are backstops, not sandboxes.** They check only what a shell would execute, fail open on input they can't handle, and need `python3`.
 - **The production guard can't see everything.** A port-forwarded production database looks like localhost, one named by a `pg_service.conf` entry isn't resolved, commands inside a double-quoted command substitution (`"$(...)"` or backticks) aren't read, and neither is a heredoc inside a quoted command string (`ssh vm 'psql <<EOF …'`); a kube context or database host named only in a variable set outside the command is treated as production and asks; interpreter code isn't read. The always-on rule covers those.
 - **Codex can't ask from a hook.** It logs an `ask` as a failed hook and runs the command, so in Codex the production guard refuses the cases it would ask about in Claude Code, and the agent hands you the command.
-- **After `codex plugin add oh-<name>@compound-v`**, that plugin's `enabled = true` comes back in `~/.codex/config.toml`. Switch it off again for your user.
+- **After `codex plugin add oh-<name>@mapleset`**, that plugin's `enabled = true` comes back in `~/.codex/config.toml`. Switch it off again for your user.
 - **Cloud sessions load no plugins**, so each repository's `AGENTS.md` repeats the rules that must always hold: I merge, a PR is a release, every PR bumps the version.
 - **Any `mise exec` in a worktree with an untrusted `mise.toml` fails**, including `mise exec -- gh pr checks --watch`. Run `mise trust <worktree>/mise.toml` first, or run it from a directory without one.
 
@@ -84,6 +89,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.8.0: oh has its own (private) marketplace, `mapleset`. A new process and secrets guard refuses killing by name or pattern (one specific process per `kill`) and printing credentials or private keys. Rules for cleaning up after a merge, flaky checks, not loosening permissions, no silent failures, no AI attribution lines and direct links; the second voice covers the instructions review tier and gets live web search (its command moved into `pull-requests`); `build-hooks.py` fails past a 9,500-character session-start budget; waxseal hand-off rules.
 - oh 2.7.1: decision packets use a local page served on 127.0.0.1, not claude.ai artifacts.
 - oh 2.7.0: *Questions* come as one decision packet on a web page (with `compound-v:interrogate` 2.6.0): research first, everything at once, show don't tell, More discussion on every decision, walkthroughs too. New *Rough edges* rule logs improvement signals on factory#8.
 - oh 2.6.0: a PR leaves draft only when the user could merge it right now (based on the default branch, mergeable, up to date, green, review clean, bump landed); stacked PRs stay drafts until retargeted, and a ready PR that stops qualifying (the base moved, or a check went red) goes back to draft. Added to *Watch your pull requests* and the `pull-requests` skill.

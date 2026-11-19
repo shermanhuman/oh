@@ -1,0 +1,40 @@
+{
+  "name": "mapleset",
+  "owner": {
+    "name": "Sherman Boyd",
+    "url": "https://github.com/shermanhuman"
+  },
+  "description": "Sherman's working agreements and his stack and API plugins (private).",
+  "plugins": [
+    {
+      "name": "oh",
+      "description": "Sherman's working agreements: mise first, pull requests as releases, version bumps, questions as one decision packet, a rough-edge log, a process and secrets guard (one specific kill at a time, no printing secret files), reviewer choices; release, waxseal, mise and Dockerfile skills.",
+      "source": "./plugins/oh"
+    },
+    {
+      "name": "oh-phoenix",
+      "description": "Phoenix, LiveView, Ecto and DaisyUI patterns and references.",
+      "source": "./plugins/oh-phoenix"
+    },
+    {
+      "name": "oh-tekmetric",
+      "description": "Tekmetric REST API: auth, pagination, sync patterns, undocumented behaviour.",
+      "source": "./plugins/oh-tekmetric"
+    },
+    {
+      "name": "oh-telnyx",
+      "description": "Telnyx Voice API v2 call control: calls, recording, webhook events.",
+      "source": "./plugins/oh-telnyx"
+    },
+    {
+      "name": "oh-postmark",
+      "description": "Postmark API: transactional and batch email, attachments.",
+      "source": "./plugins/oh-postmark"
+    },
+    {
+      "name": "oh-groq",
+      "description": "Groq API: Whisper transcription and audio processing.",
+      "source": "./plugins/oh-groq"
+    }
+  ]
+}
