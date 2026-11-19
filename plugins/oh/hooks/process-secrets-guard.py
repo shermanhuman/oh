@@ -4,12 +4,14 @@ A backstop for oh's *Process and secrets guard* rule, looking only at what a
 shell would execute:
 
 - **Kills.** Several sessions share the machine, so killing by name or pattern
-  stops other sessions' runs too. Refuses `pkill` and `killall` (any form),
-  `kill` fed by a process lookup (`$(pgrep …)`, `pgrep … | xargs kill`, a
-  variable filled from `pgrep`/`pidof`/`lsof`), a process-group or all-process
-  target (`kill -- -123`, `kill 0`, `kill -1`), and `kill` with more than one
-  target. `kill` with one literal PID, `$!`, `%job` or a variable not filled
-  from a lookup passes, and so does `kill -0` and `kill -l`.
+  stops other sessions' runs too. Refuses `pkill` and `killall` (any form), and
+  a `kill` that is fed by a process lookup (`pgrep`, `pidof`, `lsof`, `fuser`
+  or `ps` in its own substitution, in the pipe feeding it through `xargs`, or
+  in the variable it names, followed through assignments, `for` and
+  `while read`), that targets a process group or every process (`kill 0`,
+  `kill -9 -123`, `kill -- -$PGID`), or that names more than one target. One
+  PID, `$!`, `%job`, a pidfile read or a variable not filled from a lookup
+  passes, with any signal; so do `kill -0` and `kill -l`.
 - **Secret files.** A redaction filter can fail open and put a secret in the
   transcript. Refuses printing commands (cat, head, tail, less, sed, awk,
   base64, xxd, ...) on credentials and private keys: `.env*` (not examples),
@@ -19,8 +21,9 @@ shell would execute:
   kubeconfigs, `*.tfstate`, hand-off files such as `~/.app-key`, and anything
   under `~/.config/mapleset-forge/`. Certificates, sealed-secret manifests and
   `.waxseal/` metadata are not secret. `grep` passes when it can't print
-  values (`-c`, `-l`, `-q`, or `-o` with an anchored `^[...]*` pattern);
-  `sed -i`, `sort -o` and `cut -f1` pass because they don't print values.
+  values (`-c`, `-l`, `-q`, or, on key-value files such as `.env`, `-o` with
+  an anchored `^[...]*` class holding no `=`); `cut -d= -f1` on a key-value
+  file, `sed -i` and `sort -o` pass because they don't print values.
 
 Interpreter code, text inside double-quoted substitutions and commands run on
 other machines over ssh aren't inspected. Reads the hook event on stdin and
@@ -46,7 +49,6 @@ def load(name):
 
 shell = load("shell")
 DEPTH = 4
-LOOKUPS = {"pgrep", "pidof", "lsof"}
 PRINTERS = {"cat", "head", "tail", "less", "more", "bat", "batcat", "nl", "tac", "strings", "xxd", "od",
             "hexdump", "base64", "sed", "awk", "gawk", "cut", "sort", "uniq", "column", "paste", "fold", "rev"}
 GREPS = {"grep", "egrep", "rg"}
@@ -56,14 +58,26 @@ SECRET_NAME = re.compile(
     r".*[-_]key|.*\.pem)$",
     re.I,
 )
-NOT_SECRET = re.compile(r"^\.env\.(example|sample|template|dist)$|\.pub$|sealed|(^|[-_.])(cert|crt|chain|fullchain|ca|public)([-_.]|$)", re.I)
+NOT_SECRET = re.compile(r"^\.env\.(example|sample|template|dist)$|\.pub$|sealed", re.I)
+CERTIFICATE = re.compile(r"(^|[-_.])(cert|crt|chain|fullchain|ca|public)([-_.]|$)", re.I)
+PRIVATE = re.compile(r"(^|[-_.])(key|priv|private)([-_.]|$)", re.I)
+SOURCE_OR_DOC = re.compile(r"\.(exs?|rb|go|tsx?|jsx?|mjs|cjs|py|rs|java|kt|swift|c|h|cpp|md|mdx|rst|html|heex|erb|vue|svelte|css|scss)$", re.I)
+KEY_VALUE_FILE = re.compile(r"^(\.env(\..+)?|\.?mise\.local\.toml|\.dev\.vars|\.npmrc|\.pgpass|\.netrc|credentials.*)$", re.I)
+VALUE_OPTIONS = {
+    "grep": {"-m", "-A", "-B", "-C", "-d", "-D", "--include", "--exclude", "--exclude-dir", "--max-count", "--context",
+             "--after-context", "--before-context", "--label", "--binary-files"},
+    "rg": {"-m", "-A", "-B", "-C", "-g", "-t", "-T", "-j", "-M", "-E", "-r", "-d", "--glob", "--iglob", "--type", "--type-not",
+           "--threads", "--max-columns", "--encoding", "--replace", "--max-count", "--context", "--after-context",
+           "--before-context", "--color", "--colors", "--sort", "--sortr", "--max-depth", "--type-add"},
+    "sed": {"-l", "--line-length"},
+    "awk": {"-v", "-F", "--assign", "--field-separator"},
+}
+VALUE_OPTIONS["egrep"] = VALUE_OPTIONS["grep"]
+VALUE_OPTIONS["gawk"] = VALUE_OPTIONS["awk"]
 SSH_PUBLIC = re.compile(r"^(known_hosts|config|authorized_keys)([.\-_].*)?$")
 SECRET_DIRS = ("/.config/mapleset-forge",)
 KILL = "kills by name or pattern, or more than one process; kill one specific PID you started (`pgrep -fa <name>` shows them)"
 PRINT = "prints a file that holds secrets; list key names instead (`grep -o '^[A-Za-z_]*' FILE`, `grep -c NAME FILE`)"
-GROUP_OR_ALL = re.compile(r"^(-\d+|0|-1)$")
-ONE_TARGET = re.compile(r"^(\d+|\$!|%(\d+|[+-]|%)|\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\})$")
-SIGNAL_OPTIONS_WITH_VALUE = {"-s", "-n", "--signal"}
 
 
 class Skipped(Exception):
@@ -73,7 +87,8 @@ class Skipped(Exception):
 def secret_path(arg, cwd):
     if not arg or arg.startswith("-") or "=" in arg:
         return False
-    raw = os.path.expanduser(arg.strip("'\""))
+    home = os.path.expanduser("~")
+    raw = os.path.expanduser(arg.strip("'\"").replace("${HOME}", home).replace("$HOME", home))
     full = os.path.normpath(raw if os.path.isabs(raw) else os.path.join(cwd, raw))
     if "/.waxseal/" in full + "/":
         return False
@@ -84,7 +99,13 @@ def secret_path(arg, cwd):
         return True
     if os.path.dirname(full) == os.path.expanduser("~/.ssh"):
         return not (SSH_PUBLIC.match(name) or name.endswith(".pub"))
-    return bool(SECRET_NAME.match(name)) and not NOT_SECRET.search(name)
+    if not SECRET_NAME.match(name) or NOT_SECRET.search(name):
+        return False
+    if re.search(r"\.(pem|crt|cer)$", name, re.I) and CERTIFICATE.search(name) and not PRIVATE.search(name):
+        return False  # a certificate; never a .key, .p12 or .pfx
+    if re.match(r"(credentials|kubeconfig)", name, re.I) and SOURCE_OR_DOC.search(name):
+        return False  # code or docs about credentials
+    return True
 
 
 def operands(name, args):
@@ -94,17 +115,29 @@ def operands(name, args):
         if skip:
             skip = False
             continue
-        if a in ("-e", "-f", "--regexp", "--file", "--expression") or (name in ("awk", "gawk") and a == "-f"):
-            explicit, skip = True, True
-            continue
-        if name in GREPS | {"sed", "awk", "gawk"} and a in ("-m", "-A", "-B", "-C", "-g", "-t", "--glob", "--type"):
-            skip = True
-            continue
+        if name in GREPS | {"sed", "awk", "gawk"}:
+            if a in ("-e", "-f", "--regexp", "--file", "--expression"):
+                explicit, skip = True, True
+                continue
+            if re.match(r"--(regexp|file|expression)=", a):
+                explicit = True
+                continue
+            if a in VALUE_OPTIONS.get(name, ()):
+                skip = True
+                continue
         if not a.startswith("-") or a == "-":
             positional.append(a)
     if name in GREPS | {"sed", "awk", "gawk"} and not explicit and positional:
         positional = positional[1:]
     return positional
+
+
+def cut_lists_names(args):
+    """`cut -d= -f1` and its spellings: prints key names, never values."""
+    joined = " ".join(args)
+    delimiter = re.search(r"(^|\s)(-d\s*|--delimiter[=\s])['\"]?=['\"]?(\s|$)", joined)
+    fields = re.search(r"(^|\s)(-f\s*|--fields[=\s])1(\s|$)", joined)
+    return bool(delimiter and fields)
 
 
 def grep_prints(name, args):
@@ -114,41 +147,139 @@ def grep_prints(name, args):
         return False
     if any("o" in f[1:] for f in flags) or "--only-matching" in args:
         pattern = next((a for a in args if not a.startswith("-")), "")
-        return not re.fullmatch(r"\^\[[^\]]+\][*+]", pattern)
+        match = re.fullmatch(r"\^\[([^\]]+)\][*+]", pattern)
+        return not (match and (match.group(1) == "^=" or not (match.group(1).startswith("^") or "=" in match.group(1))))
     return True
 
 
-def kill_reason(args, lookup_seen):
-    targets, i = [], 0
+LOOKUP = re.compile(r"(^|[\s;|&(`$])(pgrep|pidof|lsof|fuser|ps)\b")
+KILL_VALUE_OPTIONS = {"-s", "-n", "--signal"}
+XARGS_VALUE_OPTIONS = {"-I", "-i", "-n", "-P", "-L", "-l", "-d", "-E", "-e", "-s", "-a", "--arg-file", "--delimiter", "--max-args", "--max-procs"}
+ONE_TARGET = re.compile(r"^(\d+|\$!|%(\w+|[+%-])|\$\d|\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\}|)$")
+DECLARERS = {"local", "export", "declare", "readonly", "typeset"}
+
+
+def is_lookup(word, substs=(), tainted=()):
+    """A process lookup, or a variable already filled from one."""
+    if LOOKUP.search(word) or any(LOOKUP.search(sub) for sub in substs):
+        return True
+    return any(name in tainted for name in re.findall(r"\$\{?([A-Za-z_]\w*)", word))
+
+
+def kill_commands(text):
+    """Each simple command as a list of (word, substitutions inside it), with the
+    operator that ends it. Unlike `shell.simple_commands`, a substitution stays
+    attached to the word it sits in, so a lookup is matched to its own kill."""
+    try:
+        chunks = [shell.lex(text)]
+    except shell.Unparsed:
+        chunks = []
+        for line in text.split("\n"):
+            try:
+                chunks.append(shell.lex(line))
+            except shell.Unparsed:
+                pass
+    out = []
+    for chunk in chunks:
+        words, pending, redirect = [], [], False
+        for kind, value in chunk:
+            if kind == "subst":
+                pending.append(value)
+            elif kind == "op" and set(value) & set("<>"):
+                if words and re.fullmatch(r"\d", words[-1][0]) and not words[-1][1]:
+                    words.pop()  # the file descriptor of `2>/dev/null`
+                redirect = True
+            elif kind == "op":
+                out.append((words, value))
+                words, pending, redirect = [], [], False
+            elif redirect:
+                redirect, pending = False, []
+            else:
+                words.append((value, pending))
+                pending = []
+        out.append((words, None))
+    return [(words, end) for words, end in out if words]
+
+
+def kill_target_reason(args, fed_by_lookup, tainted):
+    """Why this kill's arguments break the one-process rule, or None."""
+    targets, signal_seen, i = [], False, 0
     while i < len(args):
-        a = args[i]
-        if a in ("-l", "-L", "--list", "--help"):
+        word, substs = args[i]
+        if word in ("-l", "-L", "--list", "--help") and not targets:
             return None
-        if a == "--":
+        if word == "--":
             targets.extend(args[i + 1:])
             break
-        if a in SIGNAL_OPTIONS_WITH_VALUE:
-            i += 2
+        if not signal_seen and not targets and word in KILL_VALUE_OPTIONS:
+            if i + 1 < len(args) and args[i + 1][0] == "0":
+                return None  # kill -s 0: a liveness check
+            signal_seen, i = True, i + 2
             continue
-        if a == "-0":
-            return None
-        if a.startswith("-") and not GROUP_OR_ALL.match(a):
-            i += 1
+        if not signal_seen and not targets and not substs and re.fullmatch(r"-[A-Za-z0-9+]+|--signal=\S+", word):
+            if word in ("-0", "--signal=0"):
+                return None
+            signal_seen, i = True, i + 1
             continue
-        targets.append(a)
+        targets.append(args[i])
         i += 1
     if not targets:
-        return KILL if lookup_seen else None  # `pgrep … | xargs kill`
-    if len(targets) > 1 or any(GROUP_OR_ALL.match(t) for t in targets):
+        return KILL if fed_by_lookup else None  # `pgrep … | xargs kill`
+    if len(targets) > 1:
         return KILL
-    if targets and not ONE_TARGET.match(targets[0]):
+    word, substs = targets[0]
+    if word.startswith("-") or word == "0" or not ONE_TARGET.match(word.strip("\"'")) and "$(" not in word:
         return KILL
-    if targets and targets[0].startswith("$") and targets[0] != "$!" and lookup_seen:
+    if is_lookup(word, substs) or (word == "" and not substs):
+        return KILL
+    var = re.fullmatch(r"\$\{?([A-Za-z_]\w*)\}?", word)
+    if var and var.group(1) in tainted:
         return KILL
     return None
 
 
-def argv_reason(argv, redirects, cwd, depth, lookup_seen):
+def kill_reason(text):
+    """Walk the commands in order: refuse a kill fed by a process lookup (its own
+    substitution, the pipe feeding it, or a variable filled from a lookup), a
+    group or all-process target, or more than one target."""
+    tainted, pipeline_lookup = set(), False
+    for words, end in kill_commands(text):
+        plain = [w for w, _ in words]
+        run = shell.program(plain)
+        offset = len(words) - len(run)
+        for word, substs in words[:offset]:
+            name = word.split("=", 1)[0]
+            if shell.ASSIGNMENT.match(word):
+                (tainted.add if is_lookup(word.split("=", 1)[1], substs, tainted) else tainted.discard)(name)
+        if run:
+            name, args = os.path.basename(run[0]), words[offset + 1:]
+            if name in DECLARERS:
+                for word, substs in args:
+                    if shell.ASSIGNMENT.match(word):
+                        (tainted.add if is_lookup(word.split("=", 1)[1], substs, tainted) else tainted.discard)(word.split("=", 1)[0])
+            elif name == "for" and len(args) >= 2 and args[1][0] == "in":
+                if any(is_lookup(w, subs, tainted) for w, subs in args[2:]):
+                    tainted.add(args[0][0])
+            elif name == "read" and pipeline_lookup:
+                tainted.update(w for w, _ in args if re.fullmatch(r"[A-Za-z_]\w*", w))
+            elif name == "kill":
+                why = kill_target_reason(args, pipeline_lookup, tainted)
+                if why:
+                    return why
+            elif name == "xargs":
+                i = 0
+                while i < len(args) and args[i][0].startswith("-"):
+                    i += 2 if args[i][0] in XARGS_VALUE_OPTIONS else 1
+                if i < len(args) and os.path.basename(args[i][0]) == "kill":
+                    why = kill_target_reason(args[i + 1:], pipeline_lookup, tainted)
+                    if why:
+                        return why
+        this_lookup = is_lookup(" ".join(plain), [x for _, subs in words for x in subs])
+        pipeline_lookup = (pipeline_lookup or this_lookup) if end == "|" else False
+    return None
+
+
+def argv_reason(argv, redirects, cwd, depth):
     run = shell.program(argv)
     if not run:
         return None
@@ -157,8 +288,6 @@ def argv_reason(argv, redirects, cwd, depth, lookup_seen):
         args = args[:-1]  # the file descriptor of `2>/dev/null`, not an argument
     if name in ("pkill", "killall"):
         return None if args and all(a in ("--help", "-V", "--version", "-l", "--list") for a in args) else KILL
-    if name == "kill":
-        return kill_reason(args, lookup_seen)
     if name in shell.SHELLS:
         for i, flag in enumerate(args):
             if re.fullmatch(r"-[a-z]*c[a-z]*", flag) and i + 1 < len(args):
@@ -172,13 +301,16 @@ def argv_reason(argv, redirects, cwd, depth, lookup_seen):
         return None
     if name == "sort" and any(a == "-o" or a.startswith("--output") for a in args):
         return None
-    if name == "cut" and any(re.fullmatch(r"(-f|--fields=?)1", a) for a in args) and not any(re.fullmatch(r"-f\S*[,-]\S*", a) for a in args):
-        return None
     files = [a for a in operands(name, args) if secret_path(a, cwd)]
+    if name == "cut" and cut_lists_names(args):
+        files = [f for f in files if not KEY_VALUE_FILE.match(os.path.basename(f))]
     files += [target for op, target in redirects if op == "<" and secret_path(target, cwd)]
     if not files:
         return None
-    if name in PRINTERS or (name in GREPS and grep_prints(name, args)):
+    if name in PRINTERS:
+        return PRINT
+    if name in GREPS and (grep_prints(name, args) or not all(KEY_VALUE_FILE.match(os.path.basename(f)) for f in files)
+                          and any(re.fullmatch(r"-[A-Za-z]*o[A-Za-z]*", a) or a == "--only-matching" for a in args)):
         return PRINT
     return None
 
@@ -203,17 +335,16 @@ def reason_for(text, cwd, depth=0):
             why = reason_for(body, cwd, depth + 1)
             if why:
                 return why
-    commands, substs = shell.simple_commands(main)
-    names = {os.path.basename(shell.program(c)[0]) for c in commands if shell.program(c)}
-    lookup_seen = bool(names & LOOKUPS) or any(re.search(r"(^|[\s;|&(])(pgrep|pidof|lsof)\b", s) for s in substs)
+    _, substs = shell.simple_commands(main)
     for inner in substs:
         why = reason_for(inner, cwd, depth + 1)
         if why:
             return why
-    if "kill" in names and any(re.search(r"(^|[\s;|&(])(pgrep|pidof|lsof|ps)\b", s) for s in substs):
-        return KILL
+    why = kill_reason(main)
+    if why:
+        return why
     for argv, redirects, _ in shell.piped_commands(main):
-        why = argv_reason(argv, redirects, cwd, depth, lookup_seen)
+        why = argv_reason(argv, redirects, cwd, depth)
         if why:
             return why
     return None
