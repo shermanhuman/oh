@@ -68,7 +68,7 @@ The `oh-*` plugins are installed once at user scope, switched off in user settin
 
 ## Gotchas
 
-- **The process and secrets guard reads shell commands only.** It doesn't see the Read tool, interpreter code, commands run on another machine over ssh, a file reached through `cd dir && cat name` when only the directory marks it secret, globs (`cat .env*`), text inside a double-quoted `"$(…)"`, a script written by heredoc and then run, or PIDs passed through a file (`ps … | grep … > pids; for p in $(cat pids); do kill $p; done`). The always-on rule covers those.
+- **The process and secrets guard reads shell commands only.** It doesn't see the Read tool, interpreter code, commands run on another machine over ssh, a file reached through `cd dir && cat name` when only the directory marks it secret, globs (`cat .env*`), text inside a double-quoted `"$(…)"`, a script written by heredoc and then run, PIDs passed through a file (`ps … | grep … > pids; for p in $(cat pids); do kill $p; done`), lookups in process substitution (`done < <(pgrep …)`) or in a `{ …; }` group piped to `xargs kill`. The always-on rule covers those.
 - **Astra can't post.** It runs `codex exec -s read-only`, so it can't post comments or call MCP tools. Post its report yourself, unchanged, under an "Astra high (Codex)" header.
 - **`codex exec` skips hooks you haven't trusted**, and Astra runs don't use `--dangerously-bypass-hook-trust`, so review briefs carry the rules they need.
 - **Codex's question tool works in Plan mode only by default.** To allow it in Default mode, run `codex features enable default_mode_request_user_input` (still marked under development in Codex 0.162.1).

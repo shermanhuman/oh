@@ -69,6 +69,13 @@ DENIED = [
     "P=$(pidof vite) && kill -9 $P",
     "kill -9 $(lsof -t -i :4000)",
     "kill vite",
+    "PIDS=$(pgrep -f vite); echo $PIDS | xargs kill",
+    "P=$(pgrep vite); kill $(echo $P | head -1)",
+    "A=$(pgrep vite); B=$(echo $A); kill $B",
+    "pgrep vite |& xargs kill",
+    "/usr/bin/pgrep vite | xargs kill",
+    "cat ca-privkey.pem",
+    "cat fullchain_privkey.pem",
     "P=\"$P $(pgrep -x gh)\"; for p in $P; do kill -STOP $p; done",
     # certificate-looking private keys (M8), options, $HOME, cut and -o (m16-m20)
     "cat ca.key",
@@ -170,6 +177,10 @@ ALLOWED = [
     "cut -d'=' -f1 mise.local.toml",
     "grep -o '^[^=]*' .env",
     "cat $HOME/.ssh/config",
+    "kill -$SIG $PID",
+    "for sig in TERM KILL; do kill -$sig $PID; done",
+    "cat jwt_public_key.pem",
+    "cat public.key",
 ]
 
 

@@ -59,8 +59,9 @@ SECRET_NAME = re.compile(
     re.I,
 )
 NOT_SECRET = re.compile(r"^\.env\.(example|sample|template|dist)$|\.pub$|sealed", re.I)
-CERTIFICATE = re.compile(r"(^|[-_.])(cert|crt|chain|fullchain|ca|public)([-_.]|$)", re.I)
-PRIVATE = re.compile(r"(^|[-_.])(key|priv|private)([-_.]|$)", re.I)
+CERTIFICATE = re.compile(r"(^|[-_.])(cert|crt|chain|fullchain|ca)([-_.]|$)", re.I)
+PRIVATE = re.compile(r"priv|key", re.I)
+PUBLIC = re.compile(r"(^|[-_.])pub(lic)?([-_.]|$)", re.I)
 SOURCE_OR_DOC = re.compile(r"\.(exs?|rb|go|tsx?|jsx?|mjs|cjs|py|rs|java|kt|swift|c|h|cpp|md|mdx|rst|html|heex|erb|vue|svelte|css|scss)$", re.I)
 KEY_VALUE_FILE = re.compile(r"^(\.env(\..+)?|\.?mise\.local\.toml|\.dev\.vars|\.npmrc|\.pgpass|\.netrc|credentials.*)$", re.I)
 VALUE_OPTIONS = {
@@ -77,7 +78,7 @@ VALUE_OPTIONS["gawk"] = VALUE_OPTIONS["awk"]
 SSH_PUBLIC = re.compile(r"^(known_hosts|config|authorized_keys)([.\-_].*)?$")
 SECRET_DIRS = ("/.config/mapleset-forge",)
 KILL = "kills by name or pattern, or more than one process; kill one specific PID you started (`pgrep -fa <name>` shows them)"
-PRINT = "prints a file that holds secrets; list key names instead (`grep -o '^[A-Za-z_]*' FILE`, `grep -c NAME FILE`)"
+PRINT = "prints a file that holds secrets; list key names instead (`cut -d= -f1 FILE` on an env file, `grep -c NAME FILE`)"
 
 
 class Skipped(Exception):
@@ -103,6 +104,8 @@ def secret_path(arg, cwd):
         return False
     if re.search(r"\.(pem|crt|cer)$", name, re.I) and CERTIFICATE.search(name) and not PRIVATE.search(name):
         return False  # a certificate; never a .key, .p12 or .pfx
+    if re.search(r"\.(pem|key)$", name, re.I) and PUBLIC.search(name) and not re.search(r"priv", name, re.I):
+        return False  # a public key
     if re.match(r"(credentials|kubeconfig)", name, re.I) and SOURCE_OR_DOC.search(name):
         return False  # code or docs about credentials
     return True
@@ -152,9 +155,8 @@ def grep_prints(name, args):
     return True
 
 
-LOOKUP = re.compile(r"(^|[\s;|&(`$])(pgrep|pidof|lsof|fuser|ps)\b")
+LOOKUP = re.compile(r"(^|[\s;|&(`$/])(pgrep|pidof|lsof|fuser|ps)\b")
 KILL_VALUE_OPTIONS = {"-s", "-n", "--signal"}
-XARGS_VALUE_OPTIONS = {"-I", "-i", "-n", "-P", "-L", "-l", "-d", "-E", "-e", "-s", "-a", "--arg-file", "--delimiter", "--max-args", "--max-procs"}
 ONE_TARGET = re.compile(r"^(\d+|\$!|%(\w+|[+%-])|\$\d|\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\}|)$")
 DECLARERS = {"local", "export", "declare", "readonly", "typeset"}
 
@@ -163,7 +165,7 @@ def is_lookup(word, substs=(), tainted=()):
     """A process lookup, or a variable already filled from one."""
     if LOOKUP.search(word) or any(LOOKUP.search(sub) for sub in substs):
         return True
-    return any(name in tainted for name in re.findall(r"\$\{?([A-Za-z_]\w*)", word))
+    return any(name in tainted for text in (word, *substs) for name in re.findall(r"\$\{?([A-Za-z_]\w*)", text))
 
 
 def kill_commands(text):
@@ -216,7 +218,8 @@ def kill_target_reason(args, fed_by_lookup, tainted):
                 return None  # kill -s 0: a liveness check
             signal_seen, i = True, i + 2
             continue
-        if not signal_seen and not targets and not substs and re.fullmatch(r"-[A-Za-z0-9+]+|--signal=\S+", word):
+        variable_signal = re.fullmatch(r"-\$\{?[A-Za-z_]\w*\}?", word) and i + 1 < len(args)
+        if not signal_seen and not targets and not substs and (re.fullmatch(r"-[A-Za-z0-9+]+|--signal=\S+", word) or variable_signal):
             if word in ("-0", "--signal=0"):
                 return None
             signal_seen, i = True, i + 1
@@ -230,7 +233,7 @@ def kill_target_reason(args, fed_by_lookup, tainted):
     word, substs = targets[0]
     if word.startswith("-") or word == "0" or not ONE_TARGET.match(word.strip("\"'")) and "$(" not in word:
         return KILL
-    if is_lookup(word, substs) or (word == "" and not substs):
+    if is_lookup(word, substs, tainted) or (word == "" and not substs):
         return KILL
     var = re.fullmatch(r"\$\{?([A-Za-z_]\w*)\}?", word)
     if var and var.group(1) in tainted:
@@ -266,16 +269,8 @@ def kill_reason(text):
                 why = kill_target_reason(args, pipeline_lookup, tainted)
                 if why:
                     return why
-            elif name == "xargs":
-                i = 0
-                while i < len(args) and args[i][0].startswith("-"):
-                    i += 2 if args[i][0] in XARGS_VALUE_OPTIONS else 1
-                if i < len(args) and os.path.basename(args[i][0]) == "kill":
-                    why = kill_target_reason(args[i + 1:], pipeline_lookup, tainted)
-                    if why:
-                        return why
-        this_lookup = is_lookup(" ".join(plain), [x for _, subs in words for x in subs])
-        pipeline_lookup = (pipeline_lookup or this_lookup) if end == "|" else False
+        this_lookup = is_lookup(" ".join(plain), [x for _, subs in words for x in subs], tainted)
+        pipeline_lookup = (pipeline_lookup or this_lookup) if end in ("|", "|&") else False
     return None
 
 
