@@ -5,6 +5,8 @@ description: Docker best practices for multi-stage Alpine builds — security pa
 
 # Dockerfile — Alpine Multi-Stage Builds
 
+Version numbers and action tags in the examples show the shape, not the values. Take them from the project; for a new Dockerfile, look up the current stable Alpine release, toolchain versions and action major instead of copying these.
+
 ## Base Image Pinning
 
 There are two valid strategies. We use **Option A** because we don't run Renovate/Dependabot and the `apk upgrade` pattern covers the security gap.
@@ -163,4 +165,4 @@ Use `docker/build-push-action` with GHA cache. Preserve layer caching for routin
 
 The `apk upgrade` handles package patches only when executed. `pull` checks base image freshness. Preserve GHA caching for routine builds and explicitly refresh package layers for patch work.
 
-The version strings and action tags above are examples, not recommendations to downgrade the current project. Verify compound image tags exist and preserve compatible builder/runtime libc versions. Keep `.dockerignore` from excluding README/license files needed by builds. [Docker cache invalidation](https://docs.docker.com/build/cache/invalidation/).
+Verify compound image tags exist and preserve compatible builder/runtime libc versions. Keep `.dockerignore` from excluding README/license files needed by builds. [Docker cache invalidation](https://docs.docker.com/build/cache/invalidation/).

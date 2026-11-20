@@ -1,7 +1,7 @@
 """PreToolUse guard: kill one specific process at a time; never print secret files.
 
-A backstop for oh's *Process and secrets guard* rule, looking only at what a
-shell would execute:
+A backstop for oh's always-on *Secrets* and *Processes* rules, looking only at
+what a shell would execute:
 
 - **Kills.** Several sessions share the machine, so killing by name or pattern
   stops other sessions' runs too. Refuses `pkill` and `killall` (any form), and

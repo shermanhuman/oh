@@ -187,7 +187,7 @@ keys/pub-cert.pem              the controller's sealing certificate
 apps/<...>/*sealed*.yaml       SealedSecret manifests (path per secret in metadata)
 ```
 
-`state.yaml` is no longer written by 0.5; an existing one is left alone.
+waxseal doesn't write `state.yaml`, and leaves an existing one alone.
 
 ## Never do
 

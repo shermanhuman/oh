@@ -16,7 +16,7 @@ Inspect `.claude-plugin/plugin.json` (and `plugins/*/.claude-plugin/plugin.json`
 - Rust: update `version` under `[package]`, or under `[workspace.package]` when members inherit it (`version.workspace = true`). In a mixed workspace, check each affected member: inherited versions come from `[workspace.package]`, and a member with its own `[package].version` needs its own bump. `rust-version` is the toolchain floor, not the product version.
 - Go: `go.mod`'s Go directive is not the product version. Honor `VERSION` or equivalent when present; otherwise inspect tag/build-flag conventions. With tag-only versioning, record the intended version in the PR instead of creating a publishing tag for a bump-only task.
 
-Use the requested semver level. Without one, infer patch for fixes, minor for compatible features, and major for breaking changes, subject to the project's pre-1.0 policy. Compare with the PR base and existing edits to avoid multiple bumps for the same PR. Do not reset a larger intentional bump.
+Use the requested semver level. Without one, infer patch for fixes and docs, minor for compatible features, and major for breaking changes, subject to the project's pre-1.0 policy. Compare with the PR base and existing edits to avoid multiple bumps for the same PR. Do not reset a larger intentional bump.
 
 ## Prepare
 
