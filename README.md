@@ -11,7 +11,7 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 
 | Plugin | What it holds | Where it's on |
 |---|---|---|
-| `oh` | The always-on working agreements below, and the skills `pull-requests` (the release procedure behind them), `release`, `mise`, `waxseal` and `dockerfile` | everywhere |
+| `oh` | The always-on working agreements below, and the skills `pull-requests` (the release procedure behind them), `release`, `mise`, `waxseal`, `dockerfile` and `rough-edges` (the rough-edge log) | everywhere |
 | `oh-phoenix` | `phoenix` (LiveView, Ecto, migrations, architecture and testing references), `daisyui` | Elixir repositories |
 | `oh-tekmetric` | `tekmetric-api` with the full endpoint catalog | repositories that sync Tekmetric |
 | `oh-telnyx` | `telnyx-call-control` | voice/SMS repositories |
