@@ -12,7 +12,7 @@ Oh (Sherman's working agreements) is installed. In every session:
 
 **No silent failures.** Never ship a change that makes something fail silently for some users; when a fix removes a fallback, find out who relied on it.
 
-**Questions.** Ask everything at once, after the research, as one decision packet on a web page (`compound-v:interrogate`): the decision board once it exists, until then the local packet server in `~/github/factory-packets` (its `serve.py` says how). Give the user the link. Every decision ends with More discussion; walkthroughs (release reviews, PR summaries) work the same way. A request to act on a website carries the direct link, IDs filled in.
+**Questions.** Ask everything at once, after the research, as one decision packet on a web page (`compound-v:interrogate`): the decision board once it exists, until then the local packet server in `~/github/factory-packets` (its `serve.py` says how). Give the user the link. Show numbers as charts and an HTML table whose columns say what they measure, never a text table. Every decision ends with More discussion; walkthroughs (release reviews, PR summaries) work the same way. A request to act on a website carries the direct link, IDs filled in.
 
 **Rough edges.** When the user corrects you or picks More discussion, does by hand what a rule should have covered, when a skill misfires, a problem escapes review or work gets stuck, log it as `oh:rough-edges` describes.
 
