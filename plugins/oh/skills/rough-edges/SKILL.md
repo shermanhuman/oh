@@ -1,6 +1,6 @@
 ---
 name: rough-edges
-description: Log a rough edge on the user's improvement log. Use when the user corrects you, picks More discussion on a decision packet, overrides a recommendation for a reason research could have found, has to do by hand what a skill or rule should have covered, when a skill runs when it shouldn't or doesn't when it should, when a problem reaches staging, a release or production that a review should have caught, or when work stops after failed rounds.
+description: Logs a rough edge on the user's improvement log. Use when the user corrects the agent or picks More discussion on a packet, when a follow-up packet asks what the first could have, when the user overrides a recommendation for a reason research could have found or does by hand what a skill or rule should have covered, when a skill runs when it shouldn't or doesn't when it should, when a problem reaches staging, a release or production that a review should have caught, or when work stops after failed rounds.
 ---
 
 # Rough edges

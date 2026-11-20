@@ -75,7 +75,7 @@ run = "npm run dev"
 ## Decision tree: "I need to interact with X"
 
 1. **Is there an MCP server for it?** Check connected MCP servers (e.g., `kubernetes-mcp-server` for k8s, `argocd-mcp` for Argo CD, `postgres-mcp` for databases)
-2. **Yes →** Use MCP tools for supported non-GitHub operations. For GitHub, use `mise exec -- gh`; this explicit repository preference takes precedence.
+2. **Yes →** For non-GitHub operations, choose case by case between the MCP server and the CLI, by which covers the operation better. For GitHub, always use `mise exec -- gh`.
 3. **No →** Run `mise which <tool>` — is the CLI mise-managed?
 4. **Yes →** Run with `mise exec -- <tool> [args]`
 5. **Not installed →** Inspect project pins, then `mise install` for configured tools or `mise use <tool>@<version>` for a needed project tool. Use `--global` for an intended user-wide installation, not a default fix for a missing local command.
