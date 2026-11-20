@@ -17,4 +17,4 @@ Preserve the user's requested scope: resealing or checking does not authorize ro
 
 When the user hands you a secret, give the shortest possible command, after "copy the key first": `! wl-paste > ~/.app-key` on Linux (Wayland), `! pbpaste > ~/.app-key` on macOS. Do the hardening yourself (permissions, newline strip, shape check). Delete the handed-off file only in its own command, after waxseal's output shows the value stored: a seal piped into a filter reports the filter's status, so `waxseal … | tail && rm` deletes the file even when the seal failed. In a new worktree, run `mise trust` before the first waxseal command.
 
-When waxseal reports missing or expired Google credentials, stop and ask the user to run the sign-in it names, prefixed with `!` so it runs in the session; signing in is the user's step.
+When waxseal reports missing or expired Google credentials, stop and ask the user to run `! gcloud auth application-default login` (waxseal reads Application Default Credentials; a plain `gcloud auth login` isn't enough); signing in is the user's step.

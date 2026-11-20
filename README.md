@@ -89,6 +89,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.9.1: waxseal asks for `gcloud auth application-default login` when its credentials expire (the guard named a plain login); a plan packet comes only when the work needs the user's approval or has open decisions; the no-browser and no-artifact rules cover the HTML-file fallback too.
 - oh 2.9.0: the always-on rules are cut from about 9,350 to about 3,700 characters: short invariants stay, and each procedure lives in the skill that already held it, with a pointer sentence. A new `rough-edges` skill holds the rough-edge log's kinds and format. The attribution rule is gone (settings enforce it; Codex adds none). Questions bookend the user's attention (one packet after planning, one after reviews), and packets are linked by machine name so they open over the tailnet, with numbers shown as charts and explained tables.
 - oh 2.8.0: oh has its own (private) marketplace, `mapleset`. A new process and secrets guard refuses killing by name or pattern (one specific process per `kill`) and printing credentials or private keys. Rules for cleaning up after a merge, flaky checks, not loosening permissions, no silent failures, no AI attribution lines and direct links; the second voice covers the instructions review tier and gets live web search (its command moved into `pull-requests`); `build-hooks.py` fails past a 9,500-character session-start budget; waxseal hand-off rules.
 - oh 2.7.1: decision packets use a local page served on 127.0.0.1, not claude.ai artifacts.
