@@ -83,7 +83,7 @@ run = "npm run dev"
 
 ## MCP servers managed by mise
 
-These MCP servers are typically installed via mise and should be preferred over their CLI equivalents:
+These MCP servers are typically installed via mise; choose between each and its CLI case by case, by which covers the operation better:
 
 | MCP Server | Replaces CLI | Purpose |
 |------------|-------------|---------|
