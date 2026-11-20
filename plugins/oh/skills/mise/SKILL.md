@@ -85,7 +85,7 @@ run = "npm run dev"
 
 These MCP servers are typically installed via mise; choose between each and its CLI case by case, by which covers the operation better:
 
-| MCP Server | Replaces CLI | Purpose |
+| MCP Server | CLI equivalent | Purpose |
 |------------|-------------|---------|
 | `kubernetes-mcp-server` | `kubectl` | Kubernetes resource management |
 | `argocd-mcp` | `argocd` | Argo CD application management |
