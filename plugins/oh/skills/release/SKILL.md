@@ -35,7 +35,7 @@ Inspect actual release automation before creating tags: some repositories tag fr
 3. Track the specific release/tag workflow and commit, not merely the newest CI run: `mise exec -- gh run list --commit <sha>`, then `mise exec -- gh run view <run-id>`. For a GitHub release, verify `mise exec -- gh release view vX.Y.Z`.
 4. Report previous/new version, commit/tag, CI result, and artifact URL. Report a failed or pending publication honestly; do not substitute the newest unrelated successful run.
 
-A bump or tag doesn't by itself authorize a production rollout, secret rotation or database migration. Once the user asks for a release, its routine (restarts, Argo refreshes, migration Jobs, deploy scripts) goes ahead without asking, but a destructive migration still waits for their yes (`references/phoenix-migrations.md`).
+A bump or tag doesn't by itself authorize a production rollout, secret rotation or database migration. Once the user asks to deploy a release, its routine (restarts, Argo refreshes, migration Jobs, deploy scripts) goes ahead without asking, but a destructive migration still waits for their yes (`references/phoenix-migrations.md`).
 
 ## Project-specific release checks
 

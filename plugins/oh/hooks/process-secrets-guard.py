@@ -23,8 +23,9 @@ what a shell would execute:
   `.waxseal/` metadata are not secret. `grep` passes when it can't print
   values (`-c`, `-l`, `-q`, or, on key-value files such as `.env`, `-o` with
   an anchored pattern of `A-Z`, `0-9` and `_` classes that ends in `=`, such as
-  `^[A-Z_][A-Z0-9_]*=`: it prints names only, since a base64 line is never all
-  capitals); `sed -i` and `sort -o` pass because they don't print values. `cut`
+  `^[A-Z_][A-Z0-9_]*=`, and no flag beyond `-o`, `-E`, `-h`, `-H`, `-n` or `-N`;
+  it prints names, plus at most a short all-capitals line before `=` padding,
+  such as base32 or a key's last few base64 characters); `sed -i` and `sort -o` pass because they don't print values. `cut`
   doesn't pass: it prints a line with no delimiter whole, such as a multi-line
   key's body.
 
@@ -138,16 +139,29 @@ def operands(name, args):
     return positional
 
 
+ONLY_MATCHING_SHORT = set("oEhHnN")
+ONLY_MATCHING_LONG = {"--only-matching", "--extended-regexp", "--no-filename", "--with-filename", "--line-number",
+                      "--no-line-number"}
+
+
 def grep_prints(name, args):
     flags = [a for a in args if re.fullmatch(r"-[A-Za-z]+", a)]
     safe = "clq" + ("L" if name != "rg" else "")
     if any(set(f[1:]) & set(safe) for f in flags) or any(a in ("--count", "--files-with-matches", "--quiet", "--silent") for a in args):
         return False
     if any("o" in f[1:] for f in flags) or "--only-matching" in args:
+        # One exact shape: -o with a names-only pattern and nothing else that
+        # changes what prints (-i, -v, context, --passthru, a second -e all do).
+        for a in args:
+            if a.startswith("--"):
+                if a not in ONLY_MATCHING_LONG:
+                    return True
+            elif a.startswith("-") and len(a) > 1 and set(a[1:]) - ONLY_MATCHING_SHORT:
+                return True
         pattern = next((a for a in args if not a.startswith("-")), "")
         # Names only: classes of A-Z, 0-9 and _ up to a literal `=`. Lowercase and
         # base64 characters stay out, so a value line can't match.
-        return not re.fullmatch(r"\^(\[(A-Z|0-9|_)+\][*+]?)+=", pattern)
+        return not re.fullmatch(r"\^(\[(A-Z|0-9|_)+\][*+]?)+( \*)?=", pattern)
     return True
 
 
