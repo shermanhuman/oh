@@ -109,6 +109,9 @@ DENIED = [
     "grep -o --passthru '^[A-Z_][A-Z0-9_]*=' .env",
     "grep -oE '^[A-Z_][A-Z0-9_]*=' -e '.*' .env",
     "rg -o -C2 '^[A-Z_][A-Z0-9_]*=' .env",
+    "grep -oE '^[A-Z_][A-Z0-9_]*=' .env -N",
+    "grep '^[A-Z_][A-Z0-9_]*=' .env -oN",
+    "grep -oE '^[A-Z_][A-Z0-9_]*=' .env -N 2>/dev/null",
 ]
 
 # Everyday commands near these.
@@ -131,6 +134,7 @@ ALLOWED = [
     "grep -o '^[A-Z][A-Z0-9_]*=' mise.local.toml",
     "grep -oE '^[A-Z_][A-Z0-9_]* *=' mise.local.toml",
     "grep -ohE '^[A-Z_][A-Z0-9_]*=' .env .dev.vars",
+    "rg -oN '^[A-Z_][A-Z0-9_]*=' .env",
     "sed -i 's/^PORT=.*/PORT=4001/' .env",
     "cat .env.example",
     "cat ~/.ssh/id_ed25519.pub",

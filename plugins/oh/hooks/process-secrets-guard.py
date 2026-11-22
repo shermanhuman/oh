@@ -23,11 +23,12 @@ what a shell would execute:
   `.waxseal/` metadata are not secret. `grep` passes when it can't print
   values (`-c`, `-l`, `-q`, or, on key-value files such as `.env`, `-o` with
   an anchored pattern of `A-Z`, `0-9` and `_` classes that ends in `=`, such as
-  `^[A-Z_][A-Z0-9_]*=`, and no flag beyond `-o`, `-E`, `-h`, `-H`, `-n` or `-N`;
-  it prints names, plus at most a short all-capitals line before `=` padding,
-  such as base32 or a key's last few base64 characters); `sed -i` and `sort -o` pass because they don't print values. `cut`
-  doesn't pass: it prints a line with no delimiter whole, such as a multi-line
-  key's body.
+  `^[A-Z_][A-Z0-9_]*=`, and no other flag than `-o -E -h -H -n` for grep or
+  `-o -H -n -N` for rg; it prints uppercase names, plus at most a short
+  all-capitals line before `=` padding, such as base32 or a key's last few
+  base64 characters). `sed -i` and `sort -o` pass because they don't print
+  values. `cut` doesn't pass: it prints a line with no delimiter whole, such as
+  a multi-line key's body.
 
 Interpreter code, text inside double-quoted substitutions and commands run on
 other machines over ssh aren't inspected. Reads the hook event on stdin and
@@ -139,7 +140,10 @@ def operands(name, args):
     return positional
 
 
-ONLY_MATCHING_SHORT = set("oEhHnN")
+# Per program: -N is "no line numbers" in rg but takes a pattern in ugrep
+# (Claude Code's grep), and -E/-h mean other things in rg.
+ONLY_MATCHING_SHORT = {"rg": set("oHnN")}
+ONLY_MATCHING_SHORT_GREP = set("oEhHn")
 ONLY_MATCHING_LONG = {"--only-matching", "--extended-regexp", "--no-filename", "--with-filename", "--line-number",
                       "--no-line-number"}
 
@@ -153,10 +157,12 @@ def grep_prints(name, args):
         # One exact shape: -o with a names-only pattern and nothing else that
         # changes what prints (-i, -v, context, --passthru, a second -e all do).
         for a in args:
+            if a == "-":
+                return True
             if a.startswith("--"):
                 if a not in ONLY_MATCHING_LONG:
                     return True
-            elif a.startswith("-") and len(a) > 1 and set(a[1:]) - ONLY_MATCHING_SHORT:
+            elif a.startswith("-") and len(a) > 1 and set(a[1:]) - ONLY_MATCHING_SHORT.get(name, ONLY_MATCHING_SHORT_GREP):
                 return True
         pattern = next((a for a in args if not a.startswith("-")), "")
         # Names only: classes of A-Z, 0-9 and _ up to a literal `=`. Lowercase and
