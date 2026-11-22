@@ -1,5 +1,5 @@
-"""keep-going.py: pushes back only in a goal's build phase, at most three times
-per turn, never without Herdr, and lets the stop through on any error."""
+"""keep-going.py: pushes back only in a goal's build phase, at most once per
+turn and only for the session that owns the goal, never without Herdr, and lets the stop through on any error."""
 import json
 import os
 import pathlib
