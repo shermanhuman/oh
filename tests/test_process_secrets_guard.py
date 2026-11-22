@@ -95,6 +95,13 @@ DENIED = [
     "grep -o '^[^#]*' .env",
     "grep -o '^[A-Za-z0-9+/=_-]*' ~/.app-key",
     "grep -o '^[A-Za-z0-9_-]*' ~/.app-key",
+    # listings that print value text: a multi-line key's base64 body (oh#38)
+    "cut -d= -f1 .env",
+    "cut -s -d= -f1 .env",
+    "cut -d'=' -f1 mise.local.toml",
+    "grep -o '^[^=]*' .env",
+    "grep -o '^[A-Z_]*' .env",
+    "grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' .env",
 ]
 
 # Everyday commands near these.
@@ -113,10 +120,8 @@ ALLOWED = [
     "grep -c ANTHROPIC_API_KEY mise.local.toml",
     "grep -l TOKEN .env",
     "grep -q DATABASE_URL .env && echo set",
-    "grep -o '^[A-Za-z_]*' mise.local.toml",
-    "grep -o '^[A-Z_]*' .env",
-    "grep -oE '^[A-Z_]+' .env",
-    "cut -d= -f1 .env",
+    "grep -oE '^[A-Z_][A-Z0-9_]*=' .env",
+    "grep -o '^[A-Z][A-Z0-9_]*=' mise.local.toml",
     "sed -i 's/^PORT=.*/PORT=4001/' .env",
     "cat .env.example",
     "cat ~/.ssh/id_ed25519.pub",
@@ -173,9 +178,6 @@ ALLOWED = [
     "grep -rn --exclude-dir node_modules secret_key .",
     "rg -n --sort path credentials",
     "awk -v OFS=, '/api_key/' data.csv",
-    "cut -d = -f 1 .env",
-    "cut -d'=' -f1 mise.local.toml",
-    "grep -o '^[^=]*' .env",
     "cat $HOME/.ssh/config",
     "kill -$SIG $PID",
     "for sig in TERM KILL; do kill -$sig $PID; done",

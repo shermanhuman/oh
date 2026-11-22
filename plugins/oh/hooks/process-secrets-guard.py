@@ -22,8 +22,11 @@ what a shell would execute:
   under `~/.config/mapleset-forge/`. Certificates, sealed-secret manifests and
   `.waxseal/` metadata are not secret. `grep` passes when it can't print
   values (`-c`, `-l`, `-q`, or, on key-value files such as `.env`, `-o` with
-  an anchored `^[...]*` class holding no `=`); `cut -d= -f1` on a key-value
-  file, `sed -i` and `sort -o` pass because they don't print values.
+  an anchored pattern of `A-Z`, `0-9` and `_` classes that ends in `=`, such as
+  `^[A-Z_][A-Z0-9_]*=`: it prints names only, since a base64 line is never all
+  capitals); `sed -i` and `sort -o` pass because they don't print values. `cut`
+  doesn't pass: it prints a line with no delimiter whole, such as a multi-line
+  key's body.
 
 Interpreter code, text inside double-quoted substitutions and commands run on
 other machines over ssh aren't inspected. Reads the hook event on stdin and
@@ -78,7 +81,7 @@ VALUE_OPTIONS["gawk"] = VALUE_OPTIONS["awk"]
 SSH_PUBLIC = re.compile(r"^(known_hosts|config|authorized_keys)([.\-_].*)?$")
 SECRET_DIRS = ("/.config/mapleset-forge",)
 KILL = "kills by name or pattern, or more than one process; kill one specific PID you started (`pgrep -fa <name>` shows them)"
-PRINT = "prints a file that holds secrets; list key names instead (`cut -d= -f1 FILE` on an env file, `grep -c NAME FILE`)"
+PRINT = "prints a file that holds secrets; list key names instead (`grep -oE '^[A-Z_][A-Z0-9_]*=' FILE` on an env file, `grep -c NAME FILE`)"
 
 
 class Skipped(Exception):
@@ -135,14 +138,6 @@ def operands(name, args):
     return positional
 
 
-def cut_lists_names(args):
-    """`cut -d= -f1` and its spellings: prints key names, never values."""
-    joined = " ".join(args)
-    delimiter = re.search(r"(^|\s)(-d\s*|--delimiter[=\s])['\"]?=['\"]?(\s|$)", joined)
-    fields = re.search(r"(^|\s)(-f\s*|--fields[=\s])1(\s|$)", joined)
-    return bool(delimiter and fields)
-
-
 def grep_prints(name, args):
     flags = [a for a in args if re.fullmatch(r"-[A-Za-z]+", a)]
     safe = "clq" + ("L" if name != "rg" else "")
@@ -150,8 +145,9 @@ def grep_prints(name, args):
         return False
     if any("o" in f[1:] for f in flags) or "--only-matching" in args:
         pattern = next((a for a in args if not a.startswith("-")), "")
-        match = re.fullmatch(r"\^\[([^\]]+)\][*+]", pattern)
-        return not (match and (match.group(1) == "^=" or not (match.group(1).startswith("^") or "=" in match.group(1))))
+        # Names only: classes of A-Z, 0-9 and _ up to a literal `=`. Lowercase and
+        # base64 characters stay out, so a value line can't match.
+        return not re.fullmatch(r"\^(\[(A-Z|0-9|_)+\][*+]?)+=", pattern)
     return True
 
 
@@ -297,8 +293,6 @@ def argv_reason(argv, redirects, cwd, depth):
     if name == "sort" and any(a == "-o" or a.startswith("--output") for a in args):
         return None
     files = [a for a in operands(name, args) if secret_path(a, cwd)]
-    if name == "cut" and cut_lists_names(args):
-        files = [f for f in files if not KEY_VALUE_FILE.match(os.path.basename(f))]
     files += [target for op, target in redirects if op == "<" and secret_path(target, cwd)]
     if not files:
         return None
