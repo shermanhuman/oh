@@ -9,12 +9,13 @@ When the app uses database migrations, every release runs the repository's migra
 ## Procedure
 
 1. Never `kubectl create -f` a whole manifest file. Such a file can hold other apps' Jobs or an existing NetworkPolicy, and a Job left on a moving tag such as `:latest` can pull the previous release, find nothing to migrate and exit 0.
-2. Run only the migration Job, pinned to the release's image digest, wait for it, and save its log before the Job is cleaned up.
-3. When the repository provides a migration script (for example `scripts/run-migration.sh` that prints the digest it migrated), use it. If it fails or prints no digest, **stop: do not restart the app; the release is not migrated**, and report the error and the saved log.
-4. Proceed only when the saved log lists the release's new migration versions as applied, or reports that migrations were already up after a rerun and those versions are confirmed with a read-only query of the migrations table. For a release with no migrations of its own, "already up" is enough.
-5. Restart through the repository's deploy script with the migrated digest (for example `EXPECT_DIGEST="$digest" scripts/deploy.sh <app-name>`), which must refuse to restart onto any other image.
-6. Run the repository's post-restart checks.
+2. Before running the migration Job, read the release's pending migrations (the files added since the last release). If one drops a column or table, or deletes data, stop and wait for the user's yes; the guard hook can't see inside the Job.
+3. Run only the migration Job, pinned to the release's image digest, wait for it, and save its log before the Job is cleaned up.
+4. When the repository provides a migration script (for example `scripts/run-migration.sh` that prints the digest it migrated), use it. If it fails or prints no digest, **stop: do not restart the app; the release is not migrated**, and report the error and the saved log.
+5. Proceed only when the saved log lists the release's new migration versions as applied, or reports that migrations were already up after a rerun and those versions are confirmed with a read-only query of the migrations table. For a release with no migrations of its own, "already up" is enough.
+6. Restart through the repository's deploy script with the migrated digest (for example `EXPECT_DIGEST="$digest" scripts/deploy.sh <app-name>`), which must refuse to restart onto any other image.
+7. Run the repository's post-restart checks.
 
 ## Where it runs
 
-Run `kubectl` and these scripts through `mise exec --` when the shell is not mise-activated, following the repository's own mise notes. Run them only as part of an authorized deployment, with the actual context and namespace checked. Use the connected Kubernetes MCP or `kubectl`, whichever covers the operation better (`oh:mise`).
+Run `kubectl` and these scripts through `mise exec --` when the shell is not mise-activated, following the repository's own mise notes. Run them only as part of a deploy the user asked for, with the actual context and namespace checked. Use the connected Kubernetes MCP or `kubectl`, whichever covers the operation better (`oh:mise`).
