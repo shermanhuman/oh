@@ -79,6 +79,7 @@ ALLOWED = [
     "gcloud secrets versions list foo",
     "gcloud secrets get-iam-policy foo",
     "gcloud auth login",
+    "gcloud auth application-default login",
     "cat <<'EOF' | grep -c kubeseal\nkubeseal --fetch-cert\nEOF",
     "ssh vm uptime; cat <<'EOF' > runbook.md\nkubeseal --fetch-cert\nEOF",
     "bash -c 'echo hi' && cat <<'EOF' > notes.md\nkubeseal --fetch-cert\nEOF",

@@ -209,7 +209,7 @@ def decide(event):
         "one visible command per call, values from --from-file, stdin, --generate, "
         "or --from-key for a value waxseal already stores. "
         "If waxseal can't do what you need, stop and ask the user; don't work around it. "
-        "If gcloud needs a fresh login, ask the user to run `! gcloud auth login`."
+        "If waxseal reports missing or expired Google credentials, ask the user to run `! gcloud auth application-default login`."
     )
 
 
