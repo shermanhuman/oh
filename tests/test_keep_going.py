@@ -1,5 +1,5 @@
 """keep-going.py: pushes back only in a goal's build phase, at most three times
-per user message, never without Herdr, and lets the stop through on any error."""
+per turn, never without Herdr, and lets the stop through on any error."""
 import json
 import os
 import pathlib
@@ -49,7 +49,7 @@ class KeepGoing(unittest.TestCase):
     def test_owner_in_build_gets_one_push_naming_the_goal_and_the_exits(self):
         r = self.run_hook(dict(self.OWNED, goal="rules-release"), self.stop())
         self.assertEqual(r["decision"], "block")
-        for text in ("rules-release", "only nudge", "goal.phase=done", "blocked=", "goal.phase=paused", "background"):
+        for text in ("rules-release", "only nudge this turn", "goal.phase=done", "blocked=", "goal.phase=paused", "background"):
             self.assertIn(text, r["reason"])
 
     def test_a_turn_already_continued_is_not_pushed_again(self):
@@ -64,6 +64,7 @@ class KeepGoing(unittest.TestCase):
             self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.stop()), phase)
         self.assertIsNone(self.run_hook(dict(self.OWNED, blocked="https://x/1"), self.stop()))
         self.assertIsNone(self.run_hook(self.OWNED, self.stop(background_tasks=[{"id": "b1"}])))
+        self.assertIsNone(self.run_hook(self.OWNED, self.stop(session_crons=[{"id": "c1"}])))
 
     def test_bad_slug_lets_the_stop_through(self):
         self.assertIsNone(self.run_hook(dict(self.OWNED, goal="../etc"), self.stop()))

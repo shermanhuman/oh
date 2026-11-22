@@ -9,21 +9,21 @@ A goal is one piece of work carried by one agent from intent to done (forge's DE
 
 ## Labels and phases
 
-In a Herdr tab, `HC_TERMINAL_ID` names your terminal. Mark the goal on it:
+In a Herdr tab, `HC_TERMINAL_ID` names your terminal. Mark the goal on it (`hc` lives in `~/.local/bin`, which some shells, Codex's among them, leave off `PATH`):
 
 | When | Run |
 |---|---|
-| The goal starts (before the intent conversation), or you resume it in a new session | `hc label $HC_TERMINAL_ID goal=<slug> goal.phase=intent goal.owner=${CLAUDE_CODE_SESSION_ID:-$CODEX_THREAD_ID}` (on resume, keep the phase it was in) |
-| The user says to start planning | `hc label $HC_TERMINAL_ID goal.phase=plan` |
-| Building starts: the plan is approved, or it needs no approval (a bug, upkeep, a patch) | `hc label $HC_TERMINAL_ID goal.phase=build` |
-| Only the user can unblock you: a task for them (see *Tasks for the user*), a packet waiting for their answers, or a question that has to wait for them | `hc label $HC_TERMINAL_ID blocked=<link to the task, packet or issue>` |
-| The user has done it or answered | `hc label $HC_TERMINAL_ID blocked=` |
-| The user asks you to pause | `hc label $HC_TERMINAL_ID goal.phase=paused` |
-| The goal is done: merged, installed, cleaned up | `hc label $HC_TERMINAL_ID goal.phase=done` |
+| The goal starts (before the intent conversation), or you resume it in a new session | `~/.local/bin/hc label $HC_TERMINAL_ID goal=<slug> goal.phase=intent goal.owner=${CLAUDE_CODE_SESSION_ID:-$CODEX_THREAD_ID}` (on resume, keep the phase it was in) |
+| The user says to start planning | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=plan` |
+| Building starts: the plan is approved, or it needs no approval (a bug, upkeep, a patch) | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=build` |
+| Only the user can unblock you: a task for them (see *Tasks for the user*), a packet waiting for their answers, or a question that has to wait for them | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<link to the task, packet or issue>` |
+| The user has done it or answered | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=` |
+| The user asks you to pause | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=paused` |
+| The goal is done: merged, installed, cleaned up | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=done` |
 
 `<slug>` is short and stable (`rules-release`, `sugarhouse`): letters, digits, `.`, `_` and `-`, starting with a letter or digit, 64 characters at most. The hook ignores a tab whose slug doesn't fit. Outside Herdr (no `HC_TERMINAL_ID`), skip the labels.
 
-**In the build phase, don't end a turn announcing a next step you could take now: take it.** oh's keep-going Stop hook backs this up. If the session that owns the goal ends a turn in build, with nothing blocked and no background work running, it sends it back once, until the user's next message. It never pushes reviewers or other sessions, and never in another phase. Answering the user's question in build is fine: answer, then carry on. The user can turn the hook off with `touch ~/.local/state/oh/keep-going.off`.
+**In the build phase, don't end a turn announcing a next step you could take now: take it.** oh's keep-going Stop hook backs this up. If the session that owns the goal ends a turn in build, with nothing blocked and no background work or scheduled wake-up pending, it sends it back once for that turn. It never pushes reviewers or other sessions, and never in another phase. Answering the user's question in build is fine: answer, then carry on. The user can turn the hook off with `touch ~/.local/state/oh/keep-going.off`.
 
 ## Tasks for the user
 

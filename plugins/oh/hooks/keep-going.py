@@ -6,11 +6,11 @@ An agent working toward a goal carries Herdr tab labels (the `oh:goals` skill):
 `goal=<slug>`, `goal.phase=intent|plan|build|paused|done`, `goal.owner=<its
 session id>`, and `blocked=<link>` while only the user can unblock it.
 
-It pushes back once per user message, and only when all of these hold:
+It pushes back at most once per turn (a turn it already continued is let through), and only when all of these hold:
 - the stopping session owns the goal, so reviewers, child sessions and a later
   session in the same tab are never pushed;
 - the phase is `build` and nothing is `blocked`;
-- no background work is pending (Claude Code reports it in the event);
+- no background work or scheduled wake-up is pending (Claude Code reports both in the event);
 - this turn wasn't already continued by a Stop hook (`stop_hook_active`).
 
 Pushes are deliberately rare: every continuation rereads the whole context, which
@@ -76,7 +76,8 @@ def decide(event, env):
                 and tab.get("goal.phase") == "build"
                 and not tab.get("blocked")
                 and not event.get("stop_hook_active")
-                and not event.get("background_tasks"))
+                and not event.get("background_tasks")
+                and not event.get("session_crons"))
     log = state_dir() / "goals" / f"{goal}.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "a", encoding="utf-8") as f:
@@ -86,11 +87,11 @@ def decide(event, env):
         return None
     return {"decision": "block", "reason": (
         f"Goal `{goal}` is in its build phase and isn't done, so keep going with the next step of the plan "
-        "rather than ending the turn. This is the only nudge until the user's next message. You may stop if: "
-        "the goal is done (run `hc label $HC_TERMINAL_ID goal.phase=done`); only the user can unblock it "
-        "(post the task under **Needs the user** on the goal's issue, then `hc label $HC_TERMINAL_ID blocked=<link>`); "
-        "the user asked you to pause (`hc label $HC_TERMINAL_ID goal.phase=paused`); or you're waiting on background "
-        "work that will report back.")}
+        "rather than ending the turn. This is the only nudge this turn. You may stop if: "
+        "the goal is done (run `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=done`); only the user can unblock it "
+        "(post the task under **Needs the user** on the goal's issue, then `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<link>`); "
+        "the user asked you to pause (`~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=paused`); or you're waiting on background "
+        "work or a scheduled wake-up that will report back.")}
 
 
 def main():
@@ -99,7 +100,8 @@ def main():
         if not isinstance(event, dict):
             return
         result = decide(event, os.environ)
-    except Exception:  # fail open: a broken hook must never trap an agent
+    except Exception as e:  # fail open: a broken hook must never trap an agent
+        print(f"oh keep-going: letting the stop through ({type(e).__name__}: {e})", file=sys.stderr)
         return
     if result:
         print(json.dumps(result))
