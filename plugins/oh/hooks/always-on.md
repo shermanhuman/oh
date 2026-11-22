@@ -18,4 +18,4 @@ Oh (Sherman's working agreements) is installed. In every session:
 
 **Rough edges.** When the user corrects you, picks More discussion, overrides a recommendation for a reason research could have found, or does by hand what a rule should have covered; when a follow-up packet asks what the first could have; when a skill misfires, a problem escapes review or work gets stuck: log it as `oh:rough-edges` describes.
 
-**Reviewers.** In Claude Code, reviewer and plan-review subagents run on `fable` at high effort. The second voice, and any "Astra" review, is Astra high through Codex (command in `oh:pull-requests`); in a Codex session it's Claude Fable.
+**Reviewers.** In Claude Code, reviewer and plan-review subagents run on `fable` at high effort. On production-safety and release-path work there's no round cap or six-round guard: keep going until a round finds no must-fix, and tell reviewers there's no last round (the spinning rule still applies). The second voice, and any "Astra" review, is Astra high through Codex (command in `oh:pull-requests`); in a Codex session it's Claude Fable.
