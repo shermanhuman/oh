@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""Stop hook (Claude Code and Codex): keep an agent working on its goal.
+"""Stop hook (Claude Code and Codex): one nudge back to work for an agent
+that ends its turn in its goal's build phase.
 
 An agent working toward a goal carries Herdr tab labels (the `oh:goals` skill):
-`goal=<slug>`, `goal.phase=intent|plan|build|done`, and `blocked=<link>` while
-only the user can unblock it. When the agent tries to end its turn in the
-build phase, with nothing blocked, this hook sends it back to work: at most
-three times since the user's last message, so a stuck agent can't spin.
+`goal=<slug>`, `goal.phase=intent|plan|build|paused|done`, `goal.owner=<its
+session id>`, and `blocked=<link>` while only the user can unblock it.
 
-It never pushes back outside the build phase, so conversation (the intent
-questions, a status answer) ends turns normally. It runs `hc` only when Herdr's
-socket accepts a connection, so it never starts Herdr. It records each session
-under its goal (~/.local/state/oh/goals/<slug>.json) for the spend command.
-On anything unexpected it lets the stop through.
+It pushes back once per user message, and only when all of these hold:
+- the stopping session owns the goal, so reviewers, child sessions and a later
+  session in the same tab are never pushed;
+- the phase is `build` and nothing is `blocked`;
+- no background work is pending (Claude Code reports it in the event);
+- this turn wasn't already continued by a Stop hook (`stop_hook_active`).
+
+Pushes are deliberately rare: every continuation rereads the whole context, which
+is what makes always-on goal loops expensive. Every stop is appended to
+~/.local/state/oh/goals/<slug>.jsonl, so the spend command can price the goal and
+each push. It runs `hc` only when Herdr's socket accepts a connection, so it
+never starts Herdr. It does nothing while ~/.local/state/oh/keep-going.off
+exists. On anything unexpected it lets the stop through.
 """
 import json
 import os
@@ -23,14 +30,13 @@ import subprocess
 import sys
 import time
 
-MAX_PUSHES = 3
 HC = shutil.which("hc") or os.path.expanduser("~/.local/bin/hc")
 SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def state_dir():
     base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
-    return pathlib.Path(base) / "oh" / "goals"
+    return pathlib.Path(base) / "oh"
 
 
 def herdr_up(path):
@@ -55,6 +61,8 @@ def labels(terminal):
 
 def decide(event, env):
     """The JSON to print, or None to let the stop through."""
+    if (state_dir() / "keep-going.off").exists():
+        return None
     terminal = env.get("HC_TERMINAL_ID")
     if not terminal or not herdr_up(env.get("HC_TERMINAL_SOCKET")):
         return None
@@ -62,35 +70,27 @@ def decide(event, env):
     goal = tab.get("goal", "")
     if not SLUG.match(goal):
         return None
-    session = str(event.get("session_id") or "unknown")[:80]
-    path = state_dir() / f"{goal}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        state = json.loads(path.read_text())
-    except (OSError, ValueError):
-        state = {}
-    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    sessions = state.setdefault("sessions", {})
-    seen = sessions.setdefault(session, {"first": now, "host": "codex" if "turn_id" in event else "claude"})
-    seen["last"] = now
-    pushes = state.setdefault("pushes", {})
-    if not event.get("stop_hook_active"):
-        pushes[session] = 0  # a new user message: the count starts again
-    push = None
-    if tab.get("goal.phase") == "build" and not tab.get("blocked") and pushes.get(session, 0) < MAX_PUSHES:
-        pushes[session] = pushes.get(session, 0) + 1
-        push = pushes[session]
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=1))
-    tmp.replace(path)
-    if push is None:
+    session = str(event.get("session_id") or "")[:80]
+    push = bool(session
+                and tab.get("goal.owner") == session
+                and tab.get("goal.phase") == "build"
+                and not tab.get("blocked")
+                and not event.get("stop_hook_active")
+                and not event.get("background_tasks"))
+    log = state_dir() / "goals" / f"{goal}.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "session": session or "unknown",
+                            "host": "codex" if "turn_id" in event else "claude", "push": push}) + "\n")
+    if not push:
         return None
     return {"decision": "block", "reason": (
-        f"Goal `{goal}` is in its build phase and isn't done (keep-going push {push} of {MAX_PUSHES}). "
-        "Continue with the next step of the plan. If only the user can unblock it, post the task under "
-        "**Needs the user** on the goal's issue (the `oh:goals` template) and run "
-        f"`hc label {terminal} blocked=<link to it>`. When the goal is done, run "
-        f"`hc label {terminal} goal.phase=done`.")}
+        f"Goal `{goal}` is in its build phase and isn't done, so keep going with the next step of the plan "
+        "rather than ending the turn. This is the only nudge until the user's next message. You may stop if: "
+        "the goal is done (run `hc label $HC_TERMINAL_ID goal.phase=done`); only the user can unblock it "
+        "(post the task under **Needs the user** on the goal's issue, then `hc label $HC_TERMINAL_ID blocked=<link>`); "
+        "the user asked you to pause (`hc label $HC_TERMINAL_ID goal.phase=paused`); or you're waiting on background "
+        "work that will report back.")}
 
 
 def main():

@@ -41,48 +41,54 @@ class KeepGoing(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         return json.loads(out.stdout) if out.stdout.strip() else None
 
-    def test_build_phase_blocks_with_the_goal_named(self):
-        r = self.run_hook({"goal": "rules-release", "goal.phase": "build"})
+    OWNED = {"goal": "g", "goal.phase": "build", "goal.owner": "s1"}
+
+    def stop(self, **kw):
+        return {"session_id": "s1", "stop_hook_active": False, **kw}
+
+    def test_owner_in_build_gets_one_push_naming_the_goal_and_the_exits(self):
+        r = self.run_hook(dict(self.OWNED, goal="rules-release"), self.stop())
         self.assertEqual(r["decision"], "block")
-        self.assertIn("rules-release", r["reason"])
-        self.assertIn("push 1 of 3", r["reason"])
+        for text in ("rules-release", "only nudge", "goal.phase=done", "blocked=", "goal.phase=paused", "background"):
+            self.assertIn(text, r["reason"])
 
-    def test_other_phases_let_the_stop_through(self):
-        for phase in ("intent", "plan", "done", ""):
-            self.assertIsNone(self.run_hook({"goal": "g", "goal.phase": phase}), phase)
+    def test_a_turn_already_continued_is_not_pushed_again(self):
+        self.assertIsNone(self.run_hook(self.OWNED, self.stop(stop_hook_active=True)))
 
-    def test_blocked_lets_the_stop_through(self):
-        self.assertIsNone(self.run_hook({"goal": "g", "goal.phase": "build", "blocked": "https://x/1"}))
+    def test_other_sessions_are_never_pushed(self):
+        self.assertIsNone(self.run_hook(self.OWNED, {"session_id": "reviewer-7", "stop_hook_active": False}))
+        self.assertIsNone(self.run_hook({"goal": "g", "goal.phase": "build"}, self.stop()))  # no owner label
 
-    def test_no_goal_or_bad_slug_lets_the_stop_through(self):
-        self.assertIsNone(self.run_hook({"goal.phase": "build"}))
-        self.assertIsNone(self.run_hook({"goal": "../etc", "goal.phase": "build"}))
+    def test_other_phases_blocked_and_background_work_let_the_stop_through(self):
+        for phase in ("intent", "plan", "paused", "done", ""):
+            self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.stop()), phase)
+        self.assertIsNone(self.run_hook(dict(self.OWNED, blocked="https://x/1"), self.stop()))
+        self.assertIsNone(self.run_hook(self.OWNED, self.stop(background_tasks=[{"id": "b1"}])))
 
-    def test_three_pushes_per_user_message_then_stop(self):
-        lab = {"goal": "g", "goal.phase": "build"}
-        self.assertIsNotNone(self.run_hook(lab, {"session_id": "s1", "stop_hook_active": False}))
-        self.assertIsNotNone(self.run_hook(lab, {"session_id": "s1", "stop_hook_active": True}))
-        self.assertIsNotNone(self.run_hook(lab, {"session_id": "s1", "stop_hook_active": True}))
-        self.assertIsNone(self.run_hook(lab, {"session_id": "s1", "stop_hook_active": True}))
-        # the user's next message starts the count again
-        self.assertIsNotNone(self.run_hook(lab, {"session_id": "s1", "stop_hook_active": False}))
+    def test_bad_slug_lets_the_stop_through(self):
+        self.assertIsNone(self.run_hook(dict(self.OWNED, goal="../etc"), self.stop()))
 
     def test_without_herdr_hc_is_never_called(self):
-        self.assertIsNone(self.run_hook({"goal": "g", "goal.phase": "build"}, env={"HC_TERMINAL_SOCKET": self.sock_path + ".gone"}))
-        self.assertIsNone(self.run_hook({"goal": "g", "goal.phase": "build"}, env={"HC_TERMINAL_ID": ""}))
+        self.assertIsNone(self.run_hook(self.OWNED, env={"HC_TERMINAL_SOCKET": self.sock_path + ".gone"}))
+        self.assertIsNone(self.run_hook(self.OWNED, env={"HC_TERMINAL_ID": ""}))
+        self.assertFalse(self.calls.exists())
+
+    def test_off_switch(self):
+        (self.state / "oh").mkdir(parents=True, exist_ok=True)
+        (self.state / "oh/keep-going.off").write_text("")
+        self.assertIsNone(self.run_hook(self.OWNED, self.stop()))
         self.assertFalse(self.calls.exists())
 
     def test_malformed_input_lets_the_stop_through(self):
-        self.assertIsNone(self.run_hook({"goal": "g", "goal.phase": "build"}, raw="not json"))
-        self.assertIsNone(self.run_hook({"goal": "g", "goal.phase": "build"}, raw="[1]"))
-        self.assertIsNone(self.run_hook({"goal": "g", "goal.phase": "build"}, env={"FAKE_HC_JSON": "garbage"}))
+        self.assertIsNone(self.run_hook(self.OWNED, raw="not json"))
+        self.assertIsNone(self.run_hook(self.OWNED, raw="[1]"))
+        self.assertIsNone(self.run_hook(self.OWNED, self.stop(), env={"FAKE_HC_JSON": "garbage"}))
 
-    def test_sessions_are_recorded_under_the_goal(self):
-        self.run_hook({"goal": "g", "goal.phase": "plan"}, {"session_id": "claude-1"})
-        self.run_hook({"goal": "g", "goal.phase": "build"}, {"session_id": "codex-1", "turn_id": "x"})
-        state = json.loads((self.state / "oh/goals/g.json").read_text())
-        self.assertEqual(state["sessions"]["claude-1"]["host"], "claude")
-        self.assertEqual(state["sessions"]["codex-1"]["host"], "codex")
+    def test_every_stop_is_logged_with_its_host_and_push(self):
+        self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), {"session_id": "claude-1"})
+        self.run_hook(self.OWNED, self.stop(turn_id="x"))
+        rows = [json.loads(l) for l in (self.state / "oh/goals/g.jsonl").read_text().splitlines()]
+        self.assertEqual([(r["session"], r["host"], r["push"]) for r in rows], [("claude-1", "claude", False), ("s1", "codex", True)])
 
 
 if __name__ == "__main__":
