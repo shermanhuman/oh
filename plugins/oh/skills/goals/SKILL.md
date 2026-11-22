@@ -13,7 +13,7 @@ In a Herdr tab, `HC_TERMINAL_ID` names your terminal. Mark the goal on it (`hc` 
 
 | When | Run |
 |---|---|
-| The goal starts (before the intent conversation), or you resume it in a new session | `~/.local/bin/hc label $HC_TERMINAL_ID goal=<slug> goal.phase=intent goal.owner=${CLAUDE_CODE_SESSION_ID:-$CODEX_THREAD_ID}` (on resume, keep the phase it was in) |
+| The goal starts (before the intent conversation), or you resume it in a new session | `~/.local/bin/hc label $HC_TERMINAL_ID goal=<slug> goal.phase=intent goal.owner=${CLAUDE_CODE_SESSION_ID:-$CODEX_THREAD_ID}` (`build` instead of `intent` for a bug or upkeep; on resume, keep the phase it was in) |
 | The user says to start planning | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=plan` |
 | Building starts: the plan is approved, or it needs no approval (a bug, upkeep, a patch) | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=build` |
 | Only the user can unblock you: a task for them (see *Tasks for the user*), a packet waiting for their answers, or a question that has to wait for them | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<link to the task, packet or issue>` |
