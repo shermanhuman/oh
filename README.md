@@ -90,6 +90,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
+- oh 2.11.0: new skill `oh:mapleset-design`, Mapleset's web UI rules across its brands: DaisyUI and Lucide everywhere, which brand a project uses, where each brand package lives and how brandkit installs it, per-brand rules, and how UI picks are shown. oh-phoenix 1.0.1: the `daisyui` guide drops `shadow` from its dropdown snippet, takes themes from the brand package, and explains `row-hover`.
 - oh 2.10.2: follow-up rounds and plan re-reviews after revisions run on Opus high; whole-diff rounds and a plan's first review stay on Fable high (a revision that changes scope or approach counts as a first review). Cuts Fable use, most of which went to repeat rounds.
 - oh 2.10.1: a step waiting on the user doesn't stop the goal; the agent keeps working on what can move and sets `blocked` only when nothing can.
 - oh 2.10.0: goals. An intent conversation one question at a time; goal and phase labels on the Herdr tab; a keep-going Stop hook that nudges once per turn in the build phase (Claude Code and Codex; off with `~/.local/state/oh/keep-going.off`); questions that come up mid-work default and continue unless they can't be undone; scope, taste, outward messages and new spending are never defaulted; tasks for the user come after pushing back, in a template with exact links and commands; a spend command. New skill `oh:goals`.

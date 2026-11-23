@@ -48,8 +48,8 @@ DaisyUI provides component-level classes instead of raw Tailwind utilities:
 - Built-in themes: `light`, `dark`, `cupcake`, `dracula`, `nord`, `corporate`, `business`, etc.
 - Semantic color names: `primary`, `secondary`, `accent`, `neutral`, `base-100/200/300`, `info`, `success`, `warning`, `error`
 - Each color has a `-content` variant for text on that background (e.g. `primary-content`)
-- **Custom themes come from the brand package, never by hand.** `brandkit install <repo>@<tag>` vendors the brand's `@plugin "../vendor/daisyui-theme" { name: "…"; … }` blocks (or a plain `[data-theme]` stylesheet for a prebuilt `daisyui.css`); import them and set `data-theme`. Don't write or edit `--color-*` values in the app; change the brand package instead (`mapleset-design` skill in the `oh` plugin).
-- Brand rules ban shadows: no `shadow*` classes on cards, dropdowns or menus.
+- **Custom themes come from the brand package** in a project that has one (`brandkit.lock`): `brandkit install <owner/repo>@<tag>` vendors the brand's `@plugin "../vendor/daisyui-theme" { name: "…"; … }` blocks (or a plain `[data-theme]` stylesheet for a prebuilt `daisyui.css`); import them and set `data-theme`. Don't write or edit `--color-*` values there; change the brand package instead. A project not on a package yet keeps its hand-written theme until it migrates (`mapleset-design` skill in the `oh` plugin).
+- Follow the installed brand's rules on shadows: some brands ban them, and `brandkit lint` enforces that.
 
 ### Modifiers
 
@@ -208,7 +208,7 @@ DaisyUI v5 provides state-aware modifiers:
 </div>
 ```
 
-Modifiers: `table-zebra`, `table-xs`/`sm`/`md`/`lg`, `table-pin-rows`, `table-pin-cols`. `row-hover` on a `<tr>` is in DaisyUI's source (5.0.35 and 5.8.2) but not on its docs page, which uses `hover:bg-base-300`; either works.
+Modifiers: `table-zebra`, `table-xs`/`sm`/`md`/`lg`, `table-pin-rows`, `table-pin-cols`. `row-hover` on a `<tr>` highlights it on hover with `base-200` (`base-300` on pinned or zebra rows); it's in DaisyUI's table source, not on its docs page.
 
 ### Badge / Indicator
 
