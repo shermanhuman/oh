@@ -25,7 +25,7 @@ Each brand is one repository built with brandkit (`mise use github:shermanhuman/
 | Breakdown Analytics | `Applesauce-Labs/breakdown-brand` | |
 | RO Search | `Applesauce-Labs/rosearch-brand` | `breakdown-brand` |
 
-- **Which brand.** A project's brand is the one in its `brandkit.lock`. With no lock, take it from the work's issue, and ask if it isn't there. Applesauce Labs has no package of its own yet: ask which to use. That is a taste call, so wait for the answer rather than picking a default.
+- **Which brand** (for a project on a package, or moving onto one). A project's brand is the one in its `brandkit.lock`. With no lock, take it from the work's issue, and ask if it isn't there. Applesauce Labs has no package of its own yet: ask which to use. That is a taste call, so wait for the answer rather than picking a default.
 - **Installing.** `brandkit install <owner/repo>@<tag>`, with the newest release tag. It vendors the built files under `vendor/brand/<repo>/ui/`. If the repository or a release doesn't exist yet, say so on the work's issue; the design work waits for the package (the `brandkit:design` skill won't start without one), and no one invents tokens.
 - **Projects not on a package yet** (most Breakdown apps today) keep their hand-written theme until their own migration issue moves them. Edit it in place when a task needs it, and note the drift on that issue; don't migrate a project mid-task.
 - **Brand rules are per brand.** What a brand bans (shadows, for example, in Mapleset's) is in its package and enforced by `brandkit lint`; don't apply one brand's rules to another.
@@ -35,8 +35,8 @@ The package is the only source of colours, fonts, radius and themes for a projec
 
 ## Picks
 
-UI options for the user to choose between go wherever the always-on *Questions* rule sends questions. Each option carries its own mockup, shown as captures (desktop and mobile) or in a sandboxed frame, never as live mockup code served from the packet server's origin: a packet page accepts answer posts from its own origin.
+UI options for the user to choose between go wherever the always-on *Questions* rule sends questions. Each option carries its own mockup, shown as captures (desktop and mobile) or in a frame with `sandbox="allow-scripts"` and never `allow-same-origin`, so the mockup runs in an opaque origin. Never show live mockup code with the packet page's own origin: a packet page accepts answer posts from that origin.
 
 ## Data
 
-Charts follow the `dataviz` skill (bundled with Claude Code; in a host without it, follow the always-on packet rule on charts and tables).
+Charts follow the `dataviz` skill (bundled with Claude Code). In a host without it, use the brand's chart colours from its package and label every axis and series; in packets, follow the always-on rule on charts and tables.
