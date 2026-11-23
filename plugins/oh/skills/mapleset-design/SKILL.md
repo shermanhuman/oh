@@ -9,7 +9,7 @@ Mapleset builds web UI for several brands. These are the house rules; the method
 
 ## Standard in every project
 
-- **DaisyUI.** 5.8.2 for new work. Where a project vendors DaisyUI (`assets/vendor/daisyui.js`; the Breakdown Phoenix apps are on 5.0.35), read its version first and stay on it unless the task is the upgrade. Classes and gotchas: the `oh-phoenix:daisyui` skill.
+- **DaisyUI.** 5.8.2 for new work. Where a project vendors DaisyUI (for example `assets/vendor/daisyui.js`), read its version first and stay on it unless the task is the upgrade. Classes and gotchas: the `oh-phoenix:daisyui` skill.
 - **Lucide icons**, nothing else:
   - Phoenix: `<.icon name="lucide-…">` through the `lucide_icons` dependency.
   - Go apps: Lucide SVGs embedded in the binary.
@@ -25,7 +25,7 @@ Each brand is one repository built with brandkit (`mise use github:shermanhuman/
 | Breakdown Analytics | `Applesauce-Labs/breakdown-brand` | itself |
 | RO Search | `Applesauce-Labs/rosearch-brand` | extends breakdown |
 
-Applesauce Labs has no package of its own yet; ask which to use. A project installs its brand with `brandkit install <repo>@<tag>`. If the repository or tag doesn't exist yet, say so on the work's issue; don't invent tokens.
+Applesauce Labs has no package of its own yet; ask which to use. That is a taste call, so wait for the answer rather than picking a default. A project installs its brand with `brandkit install <repo>@<tag>`. If the repository or tag doesn't exist yet, say so on the work's issue; don't invent tokens.
 
 The package is the only source of colours, fonts, radius and themes. Use brandkit's `brandkit:brand` skill to define or change a brand and its `brandkit:design` skill for UI work on top of one.
 
