@@ -48,6 +48,8 @@ DaisyUI provides component-level classes instead of raw Tailwind utilities:
 - Built-in themes: `light`, `dark`, `cupcake`, `dracula`, `nord`, `corporate`, `business`, etc.
 - Semantic color names: `primary`, `secondary`, `accent`, `neutral`, `base-100/200/300`, `info`, `success`, `warning`, `error`
 - Each color has a `-content` variant for text on that background (e.g. `primary-content`)
+- **Custom themes come from the brand package, never by hand.** `brandkit install <repo>@<tag>` vendors the brand's `@plugin "../vendor/daisyui-theme" { name: "…"; … }` blocks (or a plain `[data-theme]` stylesheet for a prebuilt `daisyui.css`); import them and set `data-theme`. Don't write or edit `--color-*` values in the app; change the brand package instead (`mapleset-design` skill in the `oh` plugin).
+- Brand rules ban shadows: no `shadow*` classes on cards, dropdowns or menus.
 
 ### Modifiers
 
@@ -173,7 +175,7 @@ DaisyUI v5 provides state-aware modifiers:
 <details class="dropdown">
   <summary class="btn m-1">Click</summary>
   <ul
-    class="dropdown-content menu bg-base-100 rounded-box z-50 w-52 p-2 shadow"
+    class="dropdown-content menu bg-base-100 rounded-box z-50 w-52 p-2"
   >
     <li><a>Item 1</a></li>
     <li><a>Item 2</a></li>
@@ -206,7 +208,7 @@ DaisyUI v5 provides state-aware modifiers:
 </div>
 ```
 
-Modifiers: `table-zebra`, `table-xs`/`sm`/`md`/`lg`, `table-pin-rows`, `table-pin-cols`
+Modifiers: `table-zebra`, `table-xs`/`sm`/`md`/`lg`, `table-pin-rows`, `table-pin-cols`. `row-hover` on a `<tr>` is in DaisyUI's source (5.0.35 and 5.8.2) but not on its docs page, which uses `hover:bg-base-300`; either works.
 
 ### Badge / Indicator
 
