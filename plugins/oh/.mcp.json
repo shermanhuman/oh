@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "sugarhouse": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "p=$(command -v sugar); s=; case \"$p\" in */shims/*) s=$p; p= ;; esac; [ -n \"$p\" ] && m=$(command -v mise) && [ \"$p\" -ef \"$m\" ] && s=$p && p=; if [ -z \"$p\" ] && command -v mise >/dev/null 2>&1; then p=$(mise -C / which sugar </dev/null 2>/dev/null); case \"$p\" in */shims/*) p= ;; esac; fi; [ -z \"$p\" ] && p=$s; if [ -n \"$p\" ]; then exec \"$p\" mcp; fi; echo \"sugar not found: install Sugarhouse's CLI with mise (see Sugarhouse's README), or put sugar on PATH\" >&2; exit 127"
+      ]
+    }
+  }
+}
