@@ -8,7 +8,7 @@ description: This machine's specifics for pull requests on top of compound-v:pul
 The procedure is `compound-v:pull-requests`, the bump `compound-v:release` and the reviews `compound-v:review-loop`. On this machine:
 
 - **gh always goes through mise:** `mise exec -- gh …`. In a worktree whose `mise.toml` isn't trusted, mise refuses to start: run `mise trust <worktree>/mise.toml` first, or run from outside. When watching checks right after a push, put `sleep 30 &&` before `mise exec -- gh pr checks <n> -R <owner>/<repo> --watch --interval 30` in the same background command, because GitHub needs a moment to register the runs.
-- **Record a goal's PR** on its tab when you open it, so Sugarhouse's merge poller tells the tab once when it merges: `~/.local/bin/hc label $HC_TERMINAL_ID goal.prs="<urls> <new url>"` (`oh:goals`).
+- **Record a goal's PR** on its tab's `goal.prs` label when you open it (`oh:goals` has the command), so Sugarhouse tells the tab once when it merges.
 - **Link the plan, not the issue,** in the PR body when the goal's plan is in Sugarhouse: `http://soulglow:2026/plans/<slug>`.
 
 ## The second voice (Astra)

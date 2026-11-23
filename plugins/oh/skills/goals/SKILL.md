@@ -17,7 +17,7 @@ In a Herdr tab, `HC_TERMINAL_ID` names your terminal. Mark the goal on it (`hc` 
 | You open a PR for the goal | `~/.local/bin/hc label $HC_TERMINAL_ID goal.prs="<existing urls> <new url>"` (space-separated). Sugarhouse records it and tells this tab once when it merges |
 | The user says to start planning | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=plan` |
 | Building starts: the plan is approved, or it needs no approval (a bug, upkeep, a patch) | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=build` |
-| No step of the goal can move until the user acts: every remaining step waits on a task for them (see *Tasks for the user*), a packet waiting for their answers, or a question that has to wait for them. While another step can move, keep working on it instead | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<link to the Sugarhouse item>` |
+| No step of the goal can move until the user acts: every remaining step waits on a task for them (see *Tasks for the user*), a packet waiting for their answers, or a question that has to wait for them. While another step can move, keep working on it instead | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<link to the Sugarhouse item>`; while Sugarhouse is down, `blocked=local:<path of the local page>`, replaced by the item's link once it's back |
 | The user has done it or answered | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=` |
 | The user asks you to pause | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=paused` |
 | The goal is done: merged, installed, cleaned up | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=done` |
