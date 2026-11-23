@@ -1,6 +1,6 @@
 # Picks on Sugarhouse
 
-Loaded by `mapleset-design` when a UI pick goes to the user and the always-on *Questions* rule sends questions to Sugarhouse. Run `sugar` the way that rule says (it may not be on an agent shell's PATH). Otherwise the pick goes on a packet page.
+Loaded by `mapleset-design` when a UI pick goes to the user and the always-on *Questions* rule sends questions to Sugarhouse. Run `sugar` the way that rule says (it may not be on an agent shell's PATH). Otherwise it goes where that rule sends questions.
 
 If any `sugar` command exits 3, the board is unreachable: fall back as the *Questions* rule says, and never read the failure as an answer.
 
