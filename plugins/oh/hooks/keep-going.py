@@ -4,7 +4,7 @@ that ends its turn in its goal's build phase.
 
 An agent working toward a goal carries Herdr tab labels (the `oh:goals` skill):
 `goal=<slug>`, `goal.phase=intent|plan|build|paused|done`, `goal.owner=<its
-session id>`, and `blocked=<link>` while only the user can unblock it.
+session id>`, and `blocked=<link>` while no step can move until the user acts.
 
 It pushes back at most once per turn (a turn it already continued is let through), and only when all of these hold:
 - the stopping session owns the goal, so reviewers, child sessions and a later
