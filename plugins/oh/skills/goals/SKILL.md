@@ -32,7 +32,7 @@ Push back on yourself first and write the task as `compound-v:interrogate`'s *Ta
 - **Keep working on what can move:** the goal's other steps, and the waiting step as far as it goes locally (local commits, a drafted PR description, everything staged), so the user's part takes seconds. Set no label while another step can move.
 - **Set `blocked` only when no step can move,** and only after that preparation.
 
-When the user presses Done, your tab is told; run your check before carrying on, and reopen the item (`sugar reopen <id>`) with what failed if it did. Unless it's a step the rules reserve for the user, each task is also a rough edge of kind `manual-step` (`oh:rough-edges`), so recurring ones get automated; Sugarhouse's weekly view lists the most frequent ones.
+When the user presses Done, your tab is told; run your check before carrying on, and if it failed, reopen the item with what failed (`~/.local/share/mise/shims/sugar reopen <id> --note "<what failed>"`). Unless it's a step the rules reserve for the user, each task is also a rough edge of kind `manual-step` (`oh:rough-edges`), so recurring ones get automated; Sugarhouse's weekly view lists the most frequent ones.
 
 ## Spend
 

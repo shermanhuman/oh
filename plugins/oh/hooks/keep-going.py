@@ -89,7 +89,7 @@ def decide(event, env):
         f"Goal `{goal}` is in its build phase and isn't done, so keep going with the next step of the plan "
         "rather than ending the turn. This is the only nudge this turn. You may stop if: "
         "the goal is done (run `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=done`); no step can move until the user acts "
-        "(post the task or question to Sugarhouse with `sugar post`, then `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<item link>`, or `blocked=local:<page path>` while Sugarhouse is down); "
+        "(post the task or question to Sugarhouse with `~/.local/share/mise/shims/sugar post`, then `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<item link>`, or `blocked=local:<page path>` while Sugarhouse is down); "
         "the user asked you to pause (`~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=paused`); or you're waiting on background "
         "work or a scheduled wake-up that will report back.")}
 
