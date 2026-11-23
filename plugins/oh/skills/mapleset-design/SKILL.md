@@ -35,7 +35,7 @@ The package is the only source of colours, fonts, radius and themes for a projec
 
 ## Picks
 
-UI options for the user to choose between go wherever the always-on *Questions* rule sends questions. Each option carries its own mockup, shown as captures (desktop and mobile) or in a frame with `sandbox="allow-scripts"` and never `allow-same-origin`, so the mockup runs in an opaque origin. Never show live mockup code with the packet page's own origin: a packet page accepts answer posts from that origin.
+UI options for the user to choose between go wherever the always-on *Questions* rule sends questions. When `sugar` is on PATH, that's a Sugarhouse decision item: how to upload the captures, the item's shape and how to read the answer are in [references/sugarhouse-pick.md](references/sugarhouse-pick.md). Each option carries its own mockup, shown as captures (desktop and mobile) or in a frame with `sandbox="allow-scripts"` and never `allow-same-origin`, so the mockup runs in an opaque origin. Never show live mockup code with the packet page's own origin: a packet page accepts answer posts from that origin.
 
 ## Data
 
