@@ -1,8 +1,8 @@
 # Picks on Sugarhouse
 
-Loaded by `mapleset-design` when a UI pick goes to the user and `sugar` is on PATH. Otherwise the pick goes on a packet page, as the always-on *Questions* rule says.
+Loaded by `mapleset-design` when a UI pick goes to the user and the always-on *Questions* rule sends questions to Sugarhouse. Run `sugar` the way that rule says (it may not be on an agent shell's PATH). Otherwise the pick goes on a packet page.
 
-Use this when `sugar` is on PATH. If any `sugar` command exits 3, the board is unreachable: use a packet page instead, and never read the failure as an answer.
+If any `sugar` command exits 3, the board is unreachable: fall back as the *Questions* rule says, and never read the failure as an answer.
 
 1. Upload each option's two captures; each command prints a blob id:
 
@@ -41,6 +41,6 @@ Use this when `sugar` is on PATH. If any `sugar` command exits 3, the board is u
    }
    ```
 
-   B (`"label": "Density: a compact table, 25 rows at 1280", "recommended": true`) and C (`"label": "Navigation: the list on the left, the selected campaign on the right"`) follow with the same three blocks. Exactly one option is `recommended`; the board opens it first and adds More discussion and a note field itself. A `mockup` block (HTML in a sandboxed frame) may stand in for an image when the interaction is the point; captures stay the default.
+   B (`"label": "Density: a compact table, 25 rows at 1280", "recommended": true`) and C (`"label": "Navigation: the list on the left, the selected campaign on the right"`) follow with the same three blocks. Exactly one option is `recommended`; the board opens it first and adds More discussion and a note field itself. A `mockup` block (static HTML in a sandboxed frame, with scripts off) may stand in for an image when the layout at the reader's own width matters; captures stay the default.
 
 3. Wait with `sugar wait <id>` (default timeout 30 minutes; on timeout, carry on with other work and check later with `sugar get <id>`; the build waits for the answer, because a pick is a taste call). The answer is `answers[0].choice`: an option id, or `"more"` with the user's note in `answers[0].note`.
