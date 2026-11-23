@@ -88,7 +88,7 @@ def decide(event, env):
     return {"decision": "block", "reason": (
         f"Goal `{goal}` is in its build phase and isn't done, so keep going with the next step of the plan "
         "rather than ending the turn. This is the only nudge this turn. You may stop if: "
-        "the goal is done (run `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=done`); only the user can unblock it "
+        "the goal is done (run `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=done`); no step can move until the user acts "
         "(post the task under **Needs the user** on the goal's issue, then `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<link>`); "
         "the user asked you to pause (`~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=paused`); or you're waiting on background "
         "work or a scheduled wake-up that will report back.")}

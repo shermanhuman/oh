@@ -16,7 +16,7 @@ In a Herdr tab, `HC_TERMINAL_ID` names your terminal. Mark the goal on it (`hc` 
 | The goal starts (before the intent conversation), or you resume it in a new session | `~/.local/bin/hc label $HC_TERMINAL_ID goal=<slug> goal.phase=intent goal.owner=${CLAUDE_CODE_SESSION_ID:-$CODEX_THREAD_ID}` (`build` instead of `intent` for a bug or upkeep; on resume, keep the phase it was in) |
 | The user says to start planning | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=plan` |
 | Building starts: the plan is approved, or it needs no approval (a bug, upkeep, a patch) | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=build` |
-| Only the user can unblock you: a task for them (see *Tasks for the user*), a packet waiting for their answers, or a question that has to wait for them | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<link to the task, packet or issue>` |
+| No step of the goal can move until the user acts: every remaining step waits on a task for them (see *Tasks for the user*), a packet waiting for their answers, or a question that has to wait for them. One waiting step isn't this: keep working on the rest | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<link to the task, packet or issue>` |
 | The user has done it or answered | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=` |
 | The user asks you to pause | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=paused` |
 | The goal is done: merged, installed, cleaned up | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=done` |
@@ -37,7 +37,11 @@ Every task you hand the user spends their attention, the factory's scarcest reso
    - the service offers no way for an agent to do it.
 3. **Make their part as small as it can be.** Prepare the exact command, the values to enter, and the link with every ID filled in.
 
-Then post the task under a **Needs the user** heading on the goal's issue, set `blocked`, and stop. Use this shape:
+Then post the task under a **Needs the user** heading on the goal's issue. **A step waiting on the user doesn't stop the goal:**
+- **Keep working on what can move:** the goal's other steps, and the waiting step as far as it goes locally (local commits, a drafted PR description, everything staged), so the user's part takes seconds. Set no label for one waiting step.
+- **Set `blocked` only when no step can move,** and only after that preparation. The linked task says what's prepared and what happens once the user has done their part. Then stop.
+
+Use this shape:
 
 ```
 ### Sign in to Google Cloud for waxseal   ~1 min · unblocks <what>
