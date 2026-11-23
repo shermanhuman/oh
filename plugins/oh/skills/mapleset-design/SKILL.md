@@ -9,9 +9,9 @@ Mapleset builds web UI for several brands. These are the house rules; the method
 
 ## Standard in every project
 
-- **DaisyUI.** 5.8.2 for new work. Where a project vendors DaisyUI (for example `assets/vendor/daisyui.js`), read its version first and stay on it unless the task is the upgrade. Classes and gotchas: the `oh-phoenix:daisyui` skill.
+- **DaisyUI.** 5.8.2 for new work. Where a project vendors DaisyUI (for example `assets/vendor/daisyui.js`), read its version first and stay on it unless the task is the upgrade. Classes and gotchas: the `oh-phoenix:daisyui` skill where it's loaded (it switches on in Elixir repos); elsewhere, the official docs at https://daisyui.com/components/.
 - **Lucide icons**, nothing else:
-  - Phoenix: `<.icon name="lucide-…">` through the `lucide_icons` dependency.
+  - Phoenix: the `lucide_icons` dependency. The package's own components are `<Lucideicons.arrow_right />`, or `<Lucideicons.render name="arrow-right" />` for dynamic names. The Breakdown apps add a project wrapper, `<.icon name="lucide-…">` (its `icon/1` clause in `core_components.ex` strips the prefix). Use the wrapper only where the project defines it; check the locked package version before using `render`.
   - Go apps: Lucide SVGs embedded in the binary.
   - React: `lucide-react`.
 
@@ -35,4 +35,4 @@ UI options for the user to choose between go in a Sugarhouse decision item (`sug
 
 ## Data
 
-Charts follow the `dataviz` skill. Packets show numbers as charts plus a table whose columns say what they measure.
+Charts follow the `dataviz` skill (bundled with Claude Code; in a host without it, follow the always-on packet rule on charts and tables).
