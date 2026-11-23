@@ -7,4 +7,6 @@ description: Logs a rough edge on the user's improvement log. Use when the user 
 
 First line, exactly: `rough-edge: <skill or rule> · <kind> · <link>`, where the link points to the plan, PR, issue or session concerned; then a line or two on what was missing or went wrong. The kinds are compound-v's (`compound-v:interrogate`, references/rough-edges.md). On this machine, each rough edge is one comment on the private log [Applesauce-Labs/forge#8](https://github.com/Applesauce-Labs/forge/issues/8), which holds the full definitions: `mise exec -- gh issue comment 8 -R Applesauce-Labs/forge --body-file <file>`. Log it when it happens, not at the end of the session.
 
-Don't log a Sugarhouse item the user marks "not useful to ask": the board records those marks and reviews them weekly. If you can't post, as in a read-only sandbox, put the line in your final message for the caller to post.
+If you can't post a rough edge, as in a read-only sandbox, put the line in your final message for the caller to post.
+
+Don't log a Sugarhouse item the user marks "not useful to ask": the board records those marks, and the user reviews them in its weekly view.
