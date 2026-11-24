@@ -127,9 +127,9 @@ def decide(event, env):
         return None
     if asks:
         return {"decision": "block", "reason": (
-            "Your turn seems to end on a question to the user in the chat. If it isn't one, or the user is talking with you in this "
-            "tab (the intent conversation, a decision they asked to talk through, or a next pick or \"what's missing\" ask they "
-            "started here), carry on: answer where the user engages. Otherwise post it on Sugarhouse "
+            "This is oh's keep-going hook, not the user: your turn seems to end on a question to the user in the chat. If it isn't "
+            "a question, or this turn began with a message the user typed in this tab and your question is about it, end the turn "
+            "as you were (carry on). Otherwise post it on Sugarhouse "
             "(`~/.local/share/mise/shims/sugar post`) and follow oh's always-on section *Questions and plans go to Sugarhouse* for whether it waits for the "
             "answer or goes ahead on your default; only one that's cheap to undo goes ahead, and one that can't be undone always "
             "waits. Only if no step can move until the answer, run `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<item link>`. "
