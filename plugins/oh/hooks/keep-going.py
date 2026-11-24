@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
-"""Stop hook (Claude Code and Codex): one nudge back to work for an agent
-that ends its turn in its goal's build phase.
+"""Stop hook (Claude Code and Codex): one nudge for an agent that ends its turn
+in its goal's build phase with work left, or on a question to the user in the
+chat in the plan or build phase.
 
 An agent working toward a goal carries Herdr tab labels (the `oh:goals` skill):
 `goal=<slug>`, `goal.phase=intent|plan|build|paused|done`, `goal.owner=<its
 session id>`, and `blocked=<link>` while no step can move until the user acts.
 
+It also nudges once when the goal's owner ends a turn, in the plan or build
+phase and outside plan mode, on what reads as a question to the user in the
+chat: questions go to Sugarhouse. The intent conversation is in the tab, so
+the intent phase isn't nudged.
+
 It pushes back at most once per turn (a turn it already continued is let through), and only when all of these hold:
 - the stopping session owns the goal, so reviewers, child sessions and a later
   session in the same tab are never pushed;
-- the phase is `build` and nothing is `blocked`;
-- no background work or scheduled wake-up is pending (Claude Code reports both in the event);
+- the phase is `build` (or, for a question, `plan` or `build`), nothing is
+  `blocked`, and the session isn't in plan mode;
+- for the build nudge, no background work or scheduled wake-up is pending
+  (Claude Code reports both in the event);
 - this turn wasn't already continued by a Stop hook (`stop_hook_active`).
 
 Pushes are deliberately rare: every continuation rereads the whole context, which
@@ -59,6 +67,34 @@ def labels(terminal):
     return json.loads(out.stdout).get("labels") or {}
 
 
+def last_message(event):
+    """The turn's last assistant text, which Claude Code and Codex both send in
+    the Stop event."""
+    text = event.get("last_assistant_message")
+    return text if isinstance(text, str) else ""
+
+
+QUESTION_NOT = re.compile(r"https?://\S+\?$")
+
+
+def ends_on_question(text):
+    """The message's last prose line asks something. Code (fenced or
+    indented), quotes, headings, URLs and inline code that end in "?" don't
+    count."""
+    lines, fence = [], False
+    for raw in text.splitlines():
+        if raw.lstrip().startswith("```"):
+            fence = not fence
+            continue
+        if fence or not raw.strip() or raw.startswith("    ") or raw.lstrip().startswith((">", "#")):
+            continue
+        lines.append(raw.strip())
+    if not lines:
+        return False
+    last = lines[-1].rstrip("*_) ")
+    return last.endswith("?") and not QUESTION_NOT.search(last)
+
+
 def decide(event, env):
     """The JSON to print, or None to let the stop through."""
     if (state_dir() / "keep-going.off").exists():
@@ -71,20 +107,33 @@ def decide(event, env):
     if not SLUG.match(goal):
         return None
     session = str(event.get("session_id") or "")[:80]
-    push = bool(session
-                and tab.get("goal.owner") == session
-                and tab.get("goal.phase") == "build"
-                and not tab.get("blocked")
-                and not event.get("stop_hook_active")
-                and not event.get("background_tasks")
-                and not event.get("session_crons"))
+    mine = bool(session and tab.get("goal.owner") == session and not tab.get("blocked") and not event.get("stop_hook_active")
+                and event.get("permission_mode") != "plan")  # in plan mode nothing can be built or posted
+    try:
+        asks = mine and tab.get("goal.phase") in ("plan", "build") and ends_on_question(last_message(event))
+    except Exception:  # the question check never stops the log or the build nudge
+        asks = False
+    push = asks or (mine
+                    and tab.get("goal.phase") == "build"
+                    and not event.get("background_tasks")
+                    and not event.get("session_crons"))
     log = state_dir() / "goals" / f"{goal}.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "a", encoding="utf-8") as f:
         f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "session": session or "unknown",
-                            "host": "codex" if "turn_id" in event else "claude", "push": push}) + "\n")
+                            "host": "codex" if "turn_id" in event else "claude", "push": push,
+                            "nudge": "question" if asks else ("build" if push else "")}) + "\n")
     if not push:
         return None
+    if asks:
+        return {"decision": "block", "reason": (
+            "Your turn seems to end on a question to the user in the chat. If it isn't one, or it's one of the conversations that "
+            "stay in the tab (the intent conversation, talking a decision through when the user asks to, `compound-v:next`'s pick, "
+            "the \"what's missing\" ask after More discussion), carry on. Otherwise post it on Sugarhouse "
+            "(`~/.local/share/mise/shims/sugar post`) and follow oh's always-on section *Questions and plans go to Sugarhouse* for whether it waits for the "
+            "answer or goes ahead on your default; only one that's cheap to undo goes ahead, and one that can't be undone always "
+            "waits. Only if no step can move until the answer, run `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<item link>`. "
+            "While Sugarhouse is down, use a local page. This is the only nudge this turn.")}
     return {"decision": "block", "reason": (
         f"Goal `{goal}` is in its build phase and isn't done, so keep going with the next step of the plan "
         "rather than ending the turn. This is the only nudge this turn. You may stop if: "
