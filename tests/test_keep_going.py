@@ -52,29 +52,35 @@ class KeepGoing(unittest.TestCase):
         for text in ("rules-release", "only nudge this turn", "goal.phase=done", "blocked=", "goal.phase=paused", "background"):
             self.assertIn(text, r["reason"])
 
-    def transcript(self, text):
-        path = pathlib.Path(self.dir.name) / "t.jsonl"
-        path.write_text(json.dumps({"type": "user", "message": {"content": "hi"}}) + "\n"
-                        + json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}) + "\n")
-        return str(path)
+    def said(self, text, **kw):
+        return self.stop(last_assistant_message=text, **kw)
 
     def test_a_turn_ending_on_a_question_is_nudged_to_post_it(self):
-        for phase in ("plan", "build", "review"):
-            r = self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.stop(transcript_path=self.transcript("Done.\n\nShall I use the **Mapleset** web repos?")))
+        for phase in ("plan", "build"):
+            r = self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.said("Done.\n\nShall I use the **Mapleset** web repos?"))
             self.assertEqual(r["decision"], "block", phase)
-            self.assertIn("sugar post", r["reason"])
-            self.assertIn("question", r["reason"])
+            for text in ("sugar post", "can't be undone", "blocked=", "carry on"):
+                self.assertIn(text, r["reason"])
+        log = (self.state / "oh/goals/g.jsonl").read_text().splitlines()
+        self.assertEqual(json.loads(log[-1])["nudge"], "question")
 
-    def test_codex_sends_the_last_message_in_the_event(self):
-        r = self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), self.stop(last_assistant_message="Which repo should it use?"))
-        self.assertIn("question", r["reason"])
+    def test_no_question_nudge_outside_plan_and_build_or_in_plan_mode(self):
+        q = "What should it be called?"
+        for phase in ("intent", "paused", "done", "", "Plan"):
+            self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.said(q)), phase)
+        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), self.said(q, permission_mode="plan")))
+        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan", "blocked": "http://board.example.invalid/items/9"}), self.said(q)))
+        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), {"session_id": "reviewer-7", "stop_hook_active": False, "last_assistant_message": q}))
 
-    def test_no_question_nudge_in_intent_or_when_blocked_or_not_asking(self):
-        q = self.transcript("What should it be called?")
-        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "intent"}), self.stop(transcript_path=q)))
-        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan", "blocked": "http://soulglow:2026/items/9"}), self.stop(transcript_path=q)))
-        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), self.stop(transcript_path=self.transcript("Posted the plan. Waiting on the approval ask."))))
-        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), {"session_id": "reviewer-7", "stop_hook_active": False, "transcript_path": q}))
+    def test_things_that_only_end_in_a_question_mark_are_not_questions(self):
+        for text in ("Posted the plan. Waiting on the approval ask.",
+                     "Checked the predicate `Accounts.admin?`",
+                     "The search link is https://example.invalid/search?",
+                     "Done.\n\n> Why does it fail?",
+                     "Done.\n\n## Why does it fail?",
+                     "Done.\n\n    if ok?",
+                     "Done.\n\n```\nready?\n```"):
+            self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), self.said(text)), text)
 
     def test_a_turn_already_continued_is_not_pushed_again(self):
         self.assertIsNone(self.run_hook(self.OWNED, self.stop(stop_hook_active=True)))
