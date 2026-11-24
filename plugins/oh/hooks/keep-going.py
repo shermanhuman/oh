@@ -17,7 +17,8 @@ It pushes back at most once per turn (a turn it already continued is let through
   session in the same tab are never pushed;
 - the phase is `build` (or, for a question, `plan` or `build`), nothing is
   `blocked`, and the session isn't in plan mode;
-- no background work or scheduled wake-up is pending (Claude Code reports both in the event);
+- for the build nudge, no background work or scheduled wake-up is pending
+  (Claude Code reports both in the event);
 - this turn wasn't already continued by a Stop hook (`stop_hook_active`).
 
 Pushes are deliberately rare: every continuation rereads the whole context, which
@@ -126,14 +127,13 @@ def decide(event, env):
         return None
     if asks:
         return {"decision": "block", "reason": (
-            "Your turn seems to end on a question to the user in the chat. If it isn't one, or it's a conversation the user asked "
-            "for (talking a decision through, `compound-v:next`'s pick, the \"what's missing\" ask), carry on. Otherwise post it "
-            "on Sugarhouse (`~/.local/share/mise/shims/sugar post`). When its answer is cheap to undo, make your default the "
-            "recommended option and keep going on it. When it waits for the user (it can't be undone, or it's scope, a taste call, "
-            "a message that leaves the factory or new spending), post it and carry on with the work it doesn't touch. A guarded "
-            "production action is a task with the exact command for the user to run; a board answer never authorizes it. Only if "
-            "no step can move until the answer, run `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<item link>`. While Sugarhouse "
-            "is down, use a local page (`blocked=local:<page path>` in the same case). This is the only nudge this turn.")}
+            "Your turn seems to end on a question to the user in the chat. If it isn't one, or it's one of the conversations that "
+            "stay in the tab (the intent conversation, talking a decision through when the user asks to, `compound-v:next`'s pick, "
+            "the \"what's missing\" ask after More discussion), carry on. Otherwise post it on Sugarhouse "
+            "(`~/.local/share/mise/shims/sugar post`) and follow the always-on's *Questions* section for whether it waits for the "
+            "answer or goes ahead on your default; only one that's cheap to undo goes ahead, and one that can't be undone always "
+            "waits. Only if no step can move until the answer, run `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<item link>`. "
+            "While Sugarhouse is down, use a local page. This is the only nudge this turn.")}
     return {"decision": "block", "reason": (
         f"Goal `{goal}` is in its build phase and isn't done, so keep going with the next step of the plan "
         "rather than ending the turn. This is the only nudge this turn. You may stop if: "
