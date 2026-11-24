@@ -1,6 +1,6 @@
 {
   "name": "oh-phoenix",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Phoenix, LiveView, Ecto, migrations and DaisyUI patterns with focused references.",
   "author": {
     "name": "Sherman Boyd",
