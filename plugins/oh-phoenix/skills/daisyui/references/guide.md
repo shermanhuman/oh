@@ -5,7 +5,7 @@
 - Documentation
 - Installation
 - Core Concepts
-- ⚠️ CRITICAL GOTCHAS
+- Drawer gotchas
 - Component Quick Reference
 
 DaisyUI is a Tailwind CSS plugin that adds semantic component classes (e.g. `btn`, `card`, `drawer`) so you write less utility soup. **Version 5** targets **Tailwind CSS v4**, uses zero JS, and relies purely on CSS.
@@ -58,7 +58,7 @@ DaisyUI provides component-level classes instead of raw Tailwind utilities:
 
 ---
 
-## ⚠️ CRITICAL GOTCHAS
+## Drawer gotchas
 
 ### 1. Drawer positioning
 
@@ -73,7 +73,7 @@ Inspect the rendered DOM and computed styles before diagnosing a positioning iss
 
 Wire the button to the drawer's actual control state. Do not nest buttons or claim positioning is broken without inspecting its containing block. [Drawer component](https://daisyui.com/components/drawer/).
 
-### 3. Drawer structure is strict
+### 2. Drawer structure is strict
 
 The drawer has a mandatory element order. It will break if elements are rearranged:
 
@@ -87,11 +87,11 @@ The drawer has a mandatory element order. It will break if elements are rearrang
     └── (sidebar content)         // Your menu/aside
 ```
 
-### 4. Responsive drawer
+### 3. Responsive drawer
 
 - `lg:drawer-open` — sidebar always visible at `lg`+ breakpoint, overlay on smaller screens
 
-### 5. Collapsible sidebar (v5)
+### 4. Collapsible sidebar (v5)
 
 DaisyUI v5 provides state-aware modifiers:
 

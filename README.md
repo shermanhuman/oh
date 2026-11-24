@@ -90,7 +90,7 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
-- oh-phoenix 1.0.2: the `daisyui` guide points a project without a brand package at brandkit's `brand` and `design` skills instead of the dropped `mapleset-design`.
+- oh-phoenix 1.0.2: the `daisyui` guide points a project without a brand package at brandkit's `brand` and `design` skills instead of the dropped `mapleset-design`, and its "⚠️ CRITICAL GOTCHAS" heading becomes "Drawer gotchas", numbered 1 to 4.
 - oh-phoenix 1.0.1: the `daisyui` guide drops `shadow` from its dropdown snippet, takes themes from the project's brand package (brandkit) where it has one, and explains `row-hover`.
 - oh 2.11.0: Sugarhouse is the board, the plan store and the decision store: *Questions* posts items with `sugar`, tasks for the user are task items, a goal's PRs go on its `goal.prs` label for the merge poller, its type on `goal.type`, and the `sugarhouse` MCP server ships in the plugin. The generic PR procedure, release prep, tasks for the user, the rough-edge kinds and the merge, rebase and refusal rules moved to compound-v (2.11.0); `pull-requests`, `release` and `rough-edges` keep this machine's specifics. While Sugarhouse is down, answers are kept on a local page and written to the board later, and a plan's approval waits for the board.
 - oh 2.10.2: follow-up rounds and plan re-reviews after revisions run on Opus high; whole-diff rounds and a plan's first review stay on Fable high (a revision that changes scope or approach counts as a first review). Cuts Fable use, most of which went to repeat rounds.
