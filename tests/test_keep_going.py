@@ -1,5 +1,7 @@
-"""keep-going.py: pushes back only in a goal's build phase, at most once per
-turn and only for the session that owns the goal, never without Herdr, and lets the stop through on any error."""
+"""keep-going.py: pushes back in a goal's build phase, or on a question to the
+user in its plan or build phase, at most once per turn, only for the session
+that owns the goal, never in plan mode or without Herdr, and lets the stop
+through on any error."""
 import json
 import os
 import pathlib
@@ -51,6 +53,39 @@ class KeepGoing(unittest.TestCase):
         self.assertEqual(r["decision"], "block")
         for text in ("rules-release", "only nudge this turn", "goal.phase=done", "blocked=", "goal.phase=paused", "background"):
             self.assertIn(text, r["reason"])
+
+    def said(self, text, **kw):
+        return self.stop(last_assistant_message=text, **kw)
+
+    def test_a_turn_ending_on_a_question_is_nudged_to_post_it(self):
+        for phase in ("plan", "build"):
+            r = self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.said("Done.\n\n**Shall I use the Mapleset web repos?**"))
+            self.assertEqual(r["decision"], "block", phase)
+            for text in ("sugar post", "can't be undone", "Only if no step can move", "carry on"):
+                self.assertIn(text, r["reason"])
+        log = (self.state / "oh/goals/g.jsonl").read_text().splitlines()
+        self.assertEqual(json.loads(log[-1])["nudge"], "question")
+
+    def test_no_question_nudge_outside_plan_and_build_or_in_plan_mode(self):
+        q = "What should it be called?"
+        for phase in ("intent", "paused", "done", "", "Plan"):
+            self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.said(q)), phase)
+        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), self.said(q, permission_mode="plan")))
+        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan", "blocked": "http://board.example.invalid/items/9"}), self.said(q)))
+        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), {"session_id": "reviewer-7", "stop_hook_active": False, "last_assistant_message": q}))
+
+    def test_no_nudge_of_either_kind_in_plan_mode(self):
+        self.assertIsNone(self.run_hook(self.OWNED, self.stop(permission_mode="plan")))
+
+    def test_things_that_only_end_in_a_question_mark_are_not_questions(self):
+        for text in ("Posted the plan. Waiting on the approval ask.",
+                     "Checked the predicate `Accounts.admin?`",
+                     "The search link is https://example.invalid/search?",
+                     "Done.\n\n> Why does it fail?",
+                     "Done.\n\n## Why does it fail?",
+                     "Done.\n\n    if ok?",
+                     "Done.\n\n```\nready?\n```"):
+            self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), self.said(text)), text)
 
     def test_a_turn_already_continued_is_not_pushed_again(self):
         self.assertIsNone(self.run_hook(self.OWNED, self.stop(stop_hook_active=True)))
