@@ -13,10 +13,11 @@ In a Herdr tab, `HC_TERMINAL_ID` names your terminal. Mark the goal on it (`hc` 
 
 | When | Run |
 |---|---|
-| The goal starts (before the intent conversation), or you resume it in a new session | `~/.local/bin/hc label $HC_TERMINAL_ID goal=<slug> goal.phase=intent goal.owner=${CLAUDE_CODE_SESSION_ID:-$CODEX_THREAD_ID}` (`build` instead of `intent` for a bug or upkeep; on resume, keep the phase it was in) |
+| The goal starts (before the intent conversation), or you resume it in a new session | `~/.local/bin/hc label $HC_TERMINAL_ID goal=<slug> goal.phase=intent goal.type=<Patch\|Change\|Feature\|Product> goal.owner=${CLAUDE_CODE_SESSION_ID:-$CODEX_THREAD_ID}` (`build` instead of `intent` for a bug or upkeep; on resume, keep the phase it was in). Sugarhouse's ETA comes from past goals of the same type |
+| You open a PR for the goal | `~/.local/bin/hc label $HC_TERMINAL_ID goal.prs="<existing urls> <new url>"` (space-separated). Sugarhouse records it and tells this tab once when it merges |
 | The user says to start planning | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=plan` |
 | Building starts: the plan is approved, or it needs no approval (a bug, upkeep, a patch) | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=build` |
-| No step of the goal can move until the user acts: every remaining step waits on a task for them (see *Tasks for the user*), a packet waiting for their answers, or a question that has to wait for them. While another step can move, keep working on it instead | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<link to the task, packet or issue>` |
+| No step of the goal can move until the user acts: every remaining step waits on a task for them (see *Tasks for the user*), a packet waiting for their answers, or a question that has to wait for them. While another step can move, keep working on it instead | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<link to the Sugarhouse item>`; while Sugarhouse is down, `blocked=local:<path of the local page>`, replaced by the item's link once it's back |
 | The user has done it or answered | `~/.local/bin/hc label $HC_TERMINAL_ID blocked=` |
 | The user asks you to pause | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=paused` |
 | The goal is done: merged, installed, cleaned up | `~/.local/bin/hc label $HC_TERMINAL_ID goal.phase=done` |
@@ -27,43 +28,12 @@ In a Herdr tab, `HC_TERMINAL_ID` names your terminal. Mark the goal on it (`hc` 
 
 ## Tasks for the user
 
-Every task you hand the user spends their attention, the factory's scarcest resource. **Push back on yourself first:**
-1. **Is there a way in?** A CLI through mise, an API, an MCP server, or a setting that makes the step unnecessary. Look before you ask.
-2. **Is it really theirs?** Only for one of these reasons, which you name on the task:
-   - it's one of the steps the rules reserve for the user (merging, guarded production actions, signing in);
-   - it needs their own sign-in, identity or second factor;
-   - it spends money;
-   - it's physical;
-   - the service offers no way for an agent to do it.
-3. **Make their part as small as it can be.** Prepare the exact command, the values to enter, and the link with every ID filled in.
-
-Then post the task under a **Needs the user** heading on the goal's issue. **A step waiting on the user doesn't stop the goal:**
+Push back on yourself first and write the task as `compound-v:interrogate`'s *Tasks for the human* says. Post it to Sugarhouse as an item of kind `task` (`sugar post`; `sugar schema` shows `task.reason_human`, `tried`, `steps` and `check`), not on the issue. **A step waiting on the user doesn't stop the goal:**
 - **Keep working on what can move:** the goal's other steps, and the waiting step as far as it goes locally (local commits, a drafted PR description, everything staged), so the user's part takes seconds. Set no label while another step can move.
-- **Set `blocked` only when no step can move,** and only after that preparation. Update the task to say what's ready on your side and what you'll do once the user has done their part. Then stop.
+- **Set `blocked` only when no step can move,** and only after that preparation.
 
-The task uses this shape:
-
-```
-### Sign in to Google Cloud for waxseal   ~1 min · unblocks <what>
-**Why it's yours:** needs your sign-in (the credentials expired).
-**Tried:** `waxseal key add …` → "application default credentials expired".
-
-1. In a terminal on soulglow, run:
-   `gcloud auth application-default login`
-2. Approve in the browser window that opens, with your Google account.
-   You should see: "You are now authenticated with the gcloud CLI!"
-
-**I'll check it myself:** `waxseal key list` succeeds. Tell me "done".
-**Ready on my side:** the key change is committed locally. **Then I'll:** reseal, push and open the PR.
-```
-
-Rules for the steps:
-- Every link goes to the exact page, never "go to settings".
-- Every command is ready to paste.
-- Every step says what the user should see.
-
-When they say done, run your check before carrying on, and say if it failed. Unless it's a step the rules reserve for the user, each task is also a rough edge of kind `manual-step` (`oh:rough-edges`), so recurring ones get automated.
+When the user presses Done, your tab is told; run your check before carrying on, and if it failed, reopen the item with what failed (`~/.local/share/mise/shims/sugar reopen <id> --note "<what failed>"`). Unless it's a step the rules reserve for the user, each task is also a rough edge of kind `manual-step` (`oh:rough-edges`), so recurring ones get automated; Sugarhouse's weekly view lists the most frequent ones.
 
 ## Spend
 
-`python3 -I <this skill's folder>/scripts/spend.py --goal <slug>` prints the goal's Claude spend at list API prices, from the sessions the keep-going hook logged on this machine (reviewers and child sessions included), plus Codex tokens and what the hook's pushes cost. It's for reporting; there are no budgets until there's history to set them from. Put the figure in the goal's review packet.
+`python3 -I <this skill's folder>/scripts/spend.py --goal <slug>` prints the goal's Claude spend at list API prices, from the sessions the keep-going hook logged on this machine (reviewers and child sessions included), plus Codex tokens and what the hook's pushes cost. It's for reporting; there are no budgets until there's history to set them from. Sugarhouse shows it per goal, summed over both machines; put the figure in the goal's review packet too.
