@@ -52,6 +52,30 @@ class KeepGoing(unittest.TestCase):
         for text in ("rules-release", "only nudge this turn", "goal.phase=done", "blocked=", "goal.phase=paused", "background"):
             self.assertIn(text, r["reason"])
 
+    def transcript(self, text):
+        path = pathlib.Path(self.dir.name) / "t.jsonl"
+        path.write_text(json.dumps({"type": "user", "message": {"content": "hi"}}) + "\n"
+                        + json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}) + "\n")
+        return str(path)
+
+    def test_a_turn_ending_on_a_question_is_nudged_to_post_it(self):
+        for phase in ("plan", "build", "review"):
+            r = self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.stop(transcript_path=self.transcript("Done.\n\nShall I use the **Mapleset** web repos?")))
+            self.assertEqual(r["decision"], "block", phase)
+            self.assertIn("sugar post", r["reason"])
+            self.assertIn("question", r["reason"])
+
+    def test_codex_sends_the_last_message_in_the_event(self):
+        r = self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), self.stop(last_assistant_message="Which repo should it use?"))
+        self.assertIn("question", r["reason"])
+
+    def test_no_question_nudge_in_intent_or_when_blocked_or_not_asking(self):
+        q = self.transcript("What should it be called?")
+        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "intent"}), self.stop(transcript_path=q)))
+        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan", "blocked": "http://soulglow:2026/items/9"}), self.stop(transcript_path=q)))
+        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), self.stop(transcript_path=self.transcript("Posted the plan. Waiting on the approval ask."))))
+        self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), {"session_id": "reviewer-7", "stop_hook_active": False, "transcript_path": q}))
+
     def test_a_turn_already_continued_is_not_pushed_again(self):
         self.assertIsNone(self.run_hook(self.OWNED, self.stop(stop_hook_active=True)))
 

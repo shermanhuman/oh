@@ -6,6 +6,10 @@ An agent working toward a goal carries Herdr tab labels (the `oh:goals` skill):
 `goal=<slug>`, `goal.phase=intent|plan|build|paused|done`, `goal.owner=<its
 session id>`, and `blocked=<link>` while no step can move until the user acts.
 
+It also nudges once when the goal's owner ends a turn on a question to the user
+in the chat, in any phase but intent (which is a conversation in the tab),
+paused or done: questions go to Sugarhouse with a default, and the work goes on.
+
 It pushes back at most once per turn (a turn it already continued is let through), and only when all of these hold:
 - the stopping session owns the goal, so reviewers, child sessions and a later
   session in the same tab are never pushed;
@@ -59,6 +63,40 @@ def labels(terminal):
     return json.loads(out.stdout).get("labels") or {}
 
 
+def last_message(event):
+    """The turn's last assistant text: Codex sends it in the event; Claude
+    Code's is the last assistant entry in the transcript."""
+    text = event.get("last_assistant_message")
+    if isinstance(text, str):
+        return text
+    path = event.get("transcript_path")
+    if not path or not os.path.isfile(path):
+        return ""
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        f.seek(max(0, f.tell() - 400_000))
+        tail = f.read().decode("utf-8", "replace").splitlines()
+    for line in reversed(tail):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or entry.get("type") != "assistant":
+            continue
+        content = (entry.get("message") or {}).get("content") or []
+        texts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+        if any(x.strip() for x in texts):
+            return "\n".join(texts)
+    return ""
+
+
+def ends_on_question(text):
+    """The message's last line asks something (Markdown emphasis and a closing
+    bracket ignored)."""
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    return bool(lines) and lines[-1].rstrip("*_`) ").endswith("?")
+
+
 def decide(event, env):
     """The JSON to print, or None to let the stop through."""
     if (state_dir() / "keep-going.off").exists():
@@ -71,13 +109,12 @@ def decide(event, env):
     if not SLUG.match(goal):
         return None
     session = str(event.get("session_id") or "")[:80]
-    push = bool(session
-                and tab.get("goal.owner") == session
-                and tab.get("goal.phase") == "build"
-                and not tab.get("blocked")
-                and not event.get("stop_hook_active")
-                and not event.get("background_tasks")
-                and not event.get("session_crons"))
+    mine = bool(session and tab.get("goal.owner") == session and not tab.get("blocked") and not event.get("stop_hook_active"))
+    asks = mine and tab.get("goal.phase") not in ("intent", "paused", "done", "") and ends_on_question(last_message(event))
+    push = asks or (mine
+                    and tab.get("goal.phase") == "build"
+                    and not event.get("background_tasks")
+                    and not event.get("session_crons"))
     log = state_dir() / "goals" / f"{goal}.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "a", encoding="utf-8") as f:
@@ -85,6 +122,12 @@ def decide(event, env):
                             "host": "codex" if "turn_id" in event else "claude", "push": push}) + "\n")
     if not push:
         return None
+    if asks:
+        return {"decision": "block", "reason": (
+            "Your turn ends on a question to the user in the chat. Questions go to Sugarhouse instead: post it with your default "
+            "(`~/.local/share/mise/shims/sugar post`, the default as the recommended option) and keep going on the default. "
+            "If nothing can move until the user answers, also run `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<item link>`. "
+            "This is the only nudge this turn.")}
     return {"decision": "block", "reason": (
         f"Goal `{goal}` is in its build phase and isn't done, so keep going with the next step of the plan "
         "rather than ending the turn. This is the only nudge this turn. You may stop if: "
