@@ -1,5 +1,7 @@
-"""keep-going.py: pushes back only in a goal's build phase, at most once per
-turn and only for the session that owns the goal, never without Herdr, and lets the stop through on any error."""
+"""keep-going.py: pushes back in a goal's build phase, or on a question to the
+user in its plan or build phase, at most once per turn, only for the session
+that owns the goal, never in plan mode or without Herdr, and lets the stop
+through on any error."""
 import json
 import os
 import pathlib
@@ -57,9 +59,9 @@ class KeepGoing(unittest.TestCase):
 
     def test_a_turn_ending_on_a_question_is_nudged_to_post_it(self):
         for phase in ("plan", "build"):
-            r = self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.said("Done.\n\nShall I use the **Mapleset** web repos?"))
+            r = self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.said("Done.\n\n**Shall I use the Mapleset web repos?**"))
             self.assertEqual(r["decision"], "block", phase)
-            for text in ("sugar post", "can't be undone", "blocked=", "carry on"):
+            for text in ("sugar post", "can't be undone", "Only if no step can move", "carry on"):
                 self.assertIn(text, r["reason"])
         log = (self.state / "oh/goals/g.jsonl").read_text().splitlines()
         self.assertEqual(json.loads(log[-1])["nudge"], "question")
@@ -71,6 +73,9 @@ class KeepGoing(unittest.TestCase):
         self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), self.said(q, permission_mode="plan")))
         self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan", "blocked": "http://board.example.invalid/items/9"}), self.said(q)))
         self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), {"session_id": "reviewer-7", "stop_hook_active": False, "last_assistant_message": q}))
+
+    def test_no_nudge_of_either_kind_in_plan_mode(self):
+        self.assertIsNone(self.run_hook(self.OWNED, self.stop(permission_mode="plan")))
 
     def test_things_that_only_end_in_a_question_mark_are_not_questions(self):
         for text in ("Posted the plan. Waiting on the approval ask.",

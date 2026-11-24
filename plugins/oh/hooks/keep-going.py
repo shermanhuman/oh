@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Stop hook (Claude Code and Codex): one nudge back to work for an agent
-that ends its turn in its goal's build phase.
+"""Stop hook (Claude Code and Codex): one nudge for an agent that ends its turn
+in its goal's build phase with work left, or on a question to the user in the
+chat in the plan or build phase.
 
 An agent working toward a goal carries Herdr tab labels (the `oh:goals` skill):
 `goal=<slug>`, `goal.phase=intent|plan|build|paused|done`, `goal.owner=<its
@@ -14,7 +15,8 @@ the intent phase isn't nudged.
 It pushes back at most once per turn (a turn it already continued is let through), and only when all of these hold:
 - the stopping session owns the goal, so reviewers, child sessions and a later
   session in the same tab are never pushed;
-- the phase is `build` and nothing is `blocked`;
+- the phase is `build` (or, for a question, `plan` or `build`), nothing is
+  `blocked`, and the session isn't in plan mode;
 - no background work or scheduled wake-up is pending (Claude Code reports both in the event);
 - this turn wasn't already continued by a Stop hook (`stop_hook_active`).
 
@@ -71,7 +73,7 @@ def last_message(event):
     return text if isinstance(text, str) else ""
 
 
-QUESTION_NOT = re.compile(r"(https?://\S+\?$|`[^`]*\?`$)")
+QUESTION_NOT = re.compile(r"https?://\S+\?$")
 
 
 def ends_on_question(text):
@@ -104,10 +106,10 @@ def decide(event, env):
     if not SLUG.match(goal):
         return None
     session = str(event.get("session_id") or "")[:80]
-    mine = bool(session and tab.get("goal.owner") == session and not tab.get("blocked") and not event.get("stop_hook_active"))
+    mine = bool(session and tab.get("goal.owner") == session and not tab.get("blocked") and not event.get("stop_hook_active")
+                and event.get("permission_mode") != "plan")  # in plan mode nothing can be built or posted
     try:
-        asks = (mine and tab.get("goal.phase") in ("plan", "build") and event.get("permission_mode") != "plan"
-                and ends_on_question(last_message(event)))
+        asks = mine and tab.get("goal.phase") in ("plan", "build") and ends_on_question(last_message(event))
     except Exception:  # the question check never stops the log or the build nudge
         asks = False
     push = asks or (mine
@@ -124,12 +126,14 @@ def decide(event, env):
         return None
     if asks:
         return {"decision": "block", "reason": (
-            "Your turn seems to end on a question to the user in the chat; if it doesn't, carry on. Questions go to Sugarhouse: "
-            "post it (`~/.local/share/mise/shims/sugar post`). When its answer is cheap to undo, make your default the recommended "
-            "option and keep going on it. When it can't be undone, or it's a guarded production action (a board answer never "
-            "authorizes one: post a task with the exact command for the user to run), post it and run "
-            "`~/.local/bin/hc label $HC_TERMINAL_ID blocked=<item link>`, carrying on with any work it doesn't touch. "
-            "While Sugarhouse is down, use a local page and `blocked=local:<page path>`. This is the only nudge this turn.")}
+            "Your turn seems to end on a question to the user in the chat. If it isn't one, or it's a conversation the user asked "
+            "for (talking a decision through, `compound-v:next`'s pick, the \"what's missing\" ask), carry on. Otherwise post it "
+            "on Sugarhouse (`~/.local/share/mise/shims/sugar post`). When its answer is cheap to undo, make your default the "
+            "recommended option and keep going on it. When it waits for the user (it can't be undone, or it's scope, a taste call, "
+            "a message that leaves the factory or new spending), post it and carry on with the work it doesn't touch. A guarded "
+            "production action is a task with the exact command for the user to run; a board answer never authorizes it. Only if "
+            "no step can move until the answer, run `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<item link>`. While Sugarhouse "
+            "is down, use a local page (`blocked=local:<page path>` in the same case). This is the only nudge this turn.")}
     return {"decision": "block", "reason": (
         f"Goal `{goal}` is in its build phase and isn't done, so keep going with the next step of the plan "
         "rather than ending the turn. This is the only nudge this turn. You may stop if: "
