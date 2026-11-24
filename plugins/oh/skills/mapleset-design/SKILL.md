@@ -29,7 +29,7 @@ Each brand is one repository built with brandkit (`mise use github:shermanhuman/
 - **Installing.** `brandkit install <owner/repo>@<tag>`, with the newest release tag. It vendors the built files under `vendor/brand/<repo>/ui/`. If the repository or a release doesn't exist yet, say so on the work's issue; the design work waits for the package (the `brandkit:design` skill won't start without one), and no one invents tokens.
 - **Projects not on a package yet** (most Breakdown apps today) keep their hand-written theme until their own migration issue moves them. Edit it in place when a task needs it, and note the drift on that issue; don't migrate a project mid-task.
 - **Brand rules are per brand.** What a brand bans (shadows, for example, in Mapleset's) is in its package and enforced by `brandkit lint`; don't apply one brand's rules to another.
-- **Packets** use the factory-packets template and its theme as they are.
+- **Packets and board items** keep their own look; never brand them.
 
 The package is the only source of colours, fonts, radius and themes for a project on one. Use brandkit's `brandkit:brand` skill to define or change a brand and its `brandkit:design` skill for UI work on top of one.
 
@@ -39,4 +39,4 @@ UI options for the user to choose between go wherever the always-on *Questions* 
 
 ## Data
 
-Charts follow the `dataviz` skill (bundled with Claude Code). In a host without it, use the DaisyUI theme's role colours (`primary`, `secondary`, `accent`, `info`) and label every axis and series; in packets, follow the always-on rule on charts and tables.
+Charts follow the `dataviz` skill (bundled with Claude Code). In a host without it, use the DaisyUI theme's role colours (`primary`, `secondary`, `accent`, `info`) and label every axis and series; in packets and board items, show numbers as `compound-v:interrogate`'s *Show, don't tell* says (a chart, and a table whose columns say what they measure).
