@@ -48,7 +48,7 @@ DaisyUI provides component-level classes instead of raw Tailwind utilities:
 - Built-in themes: `light`, `dark`, `cupcake`, `dracula`, `nord`, `corporate`, `business`, etc.
 - Semantic color names: `primary`, `secondary`, `accent`, `neutral`, `base-100/200/300`, `info`, `success`, `warning`, `error`
 - Each color has a `-content` variant for text on that background (e.g. `primary-content`)
-- **Custom themes come from the brand package** in a project that has one (`brandkit.lock`): `brandkit install <owner/repo>@<tag>` vendors the brand's `@plugin "../vendor/daisyui-theme" { name: "…"; … }` blocks (or a plain `[data-theme]` stylesheet for a prebuilt `daisyui.css`); import them and set `data-theme`. Don't write or edit `--color-*` values there; change the brand package instead. A project not on a package yet keeps its hand-written theme until it adopts one: brandkit's `brand` skill defines a brand package, and its `design` skill works in a project that has one (plugin `brandkit@compound-v`).
+- **Custom themes come from the brand package** in a project that has one (`brandkit.lock`): `brandkit install <owner/repo>@<tag>` vendors the brand's `@plugin "../vendor/daisyui-theme" { name: "…"; … }` blocks (or a plain `[data-theme]` stylesheet for a prebuilt `daisyui.css`); import them and set `data-theme`. Don't write or edit `--color-*` values there; change the brand package instead. A project not on a package yet keeps its hand-written theme until it adopts one: `brandkit:brand` defines a brand package, and `brandkit:design` designs UI in a project that has one (plugin `brandkit@compound-v`).
 - Follow the installed brand's rules on shadows: some brands ban them, and `brandkit lint` enforces that.
 
 ### Modifiers
