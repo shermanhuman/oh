@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Stop hook (Claude Code and Codex): one nudge for an agent that ends its turn
 in its goal's build phase with work left, or on a question to the user in the
-chat in the plan or build phase.
+chat in the intent, plan or build phase.
 
 An agent working toward a goal carries Herdr tab labels (the `oh:goals` skill):
 `goal=<slug>`, `goal.phase=intent|plan|build|paused|done`, `goal.owner=<its
 session id>`, and `blocked=<link>` while no step can move until the user acts.
 
-It also nudges once when the goal's owner ends a turn, in the plan or build
+It also nudges once when the goal's owner ends a turn, in the intent, plan or build
 phase and outside plan mode, on what reads as a question to the user in the
-chat (intent, plan and build phases): compound-v's *Answer where the user
+chat: compound-v's *Answer where the user
 engages* decides whether it belongs in the tab or on Sugarhouse.
 
 It pushes back at most once per turn (a turn it already continued is let through), and only when all of these hold:
