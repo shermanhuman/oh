@@ -5,7 +5,7 @@
 - Documentation
 - Installation
 - Core Concepts
-- ⚠️ CRITICAL GOTCHAS
+- Drawer gotchas
 - Component Quick Reference
 
 DaisyUI is a Tailwind CSS plugin that adds semantic component classes (e.g. `btn`, `card`, `drawer`) so you write less utility soup. **Version 5** targets **Tailwind CSS v4**, uses zero JS, and relies purely on CSS.
@@ -48,7 +48,7 @@ DaisyUI provides component-level classes instead of raw Tailwind utilities:
 - Built-in themes: `light`, `dark`, `cupcake`, `dracula`, `nord`, `corporate`, `business`, etc.
 - Semantic color names: `primary`, `secondary`, `accent`, `neutral`, `base-100/200/300`, `info`, `success`, `warning`, `error`
 - Each color has a `-content` variant for text on that background (e.g. `primary-content`)
-- **Custom themes come from the brand package** in a project that has one (`brandkit.lock`): `brandkit install <owner/repo>@<tag>` vendors the brand's `@plugin "../vendor/daisyui-theme" { name: "…"; … }` blocks (or a plain `[data-theme]` stylesheet for a prebuilt `daisyui.css`); import them and set `data-theme`. Don't write or edit `--color-*` values there; change the brand package instead. A project not on a package yet keeps its hand-written theme until it migrates (`mapleset-design` skill in the `oh` plugin).
+- **Custom themes come from the brand package** in a project that has one (`brandkit.lock`): `brandkit install <owner/repo>@<tag>` vendors the brand's `@plugin "../vendor/daisyui-theme" { name: "…"; … }` blocks (or a plain `[data-theme]` stylesheet for a prebuilt `daisyui.css`); import them and set `data-theme`. Don't write or edit `--color-*` values there; change the brand package instead. A project not on a package yet keeps its hand-written theme until it adopts one: `brandkit:brand` defines a brand package, and `brandkit:design` designs UI in a project that has one (plugin `brandkit@compound-v`).
 - Follow the installed brand's rules on shadows: some brands ban them, and `brandkit lint` enforces that.
 
 ### Modifiers
@@ -58,7 +58,7 @@ DaisyUI provides component-level classes instead of raw Tailwind utilities:
 
 ---
 
-## ⚠️ CRITICAL GOTCHAS
+## Drawer gotchas
 
 ### 1. Drawer positioning
 
@@ -73,7 +73,7 @@ Inspect the rendered DOM and computed styles before diagnosing a positioning iss
 
 Wire the button to the drawer's actual control state. Do not nest buttons or claim positioning is broken without inspecting its containing block. [Drawer component](https://daisyui.com/components/drawer/).
 
-### 3. Drawer structure is strict
+### 2. Drawer structure is strict
 
 The drawer has a mandatory element order. It will break if elements are rearranged:
 
@@ -87,11 +87,11 @@ The drawer has a mandatory element order. It will break if elements are rearrang
     └── (sidebar content)         // Your menu/aside
 ```
 
-### 4. Responsive drawer
+### 3. Responsive drawer
 
 - `lg:drawer-open` — sidebar always visible at `lg`+ breakpoint, overlay on smaller screens
 
-### 5. Collapsible sidebar (v5)
+### 4. Collapsible sidebar (v5)
 
 DaisyUI v5 provides state-aware modifiers:
 
