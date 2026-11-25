@@ -261,8 +261,11 @@ class Wrappers(Env):
         env["PATH"] = f"{TOOLS / 'bin'}{os.pathsep}{bindir}{os.pathsep}/usr/bin:/bin"
         out = subprocess.run([sys.executable, TOOLS / "bin/gh", "--version"], capture_output=True,
                              text=True, env=env, timeout=20)
-        if shutil.which("mise", path=env["PATH"]) is None:
-            self.assertEqual(out.stdout.strip(), "real")
+        # Which real gh it finds depends on the machine (a CI runner has /usr/bin/gh);
+        # what matters is that it found one and never ran itself again.
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("called itself", out.stderr)
+        self.assertTrue(out.stdout.strip() == "real" or out.stdout.startswith("gh version"), out.stdout)
 
     def test_gh_refuses_to_loop(self):
         out = subprocess.run([sys.executable, TOOLS / "bin/gh", "api", "user"], capture_output=True,
