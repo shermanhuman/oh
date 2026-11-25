@@ -1,0 +1,11 @@
+[Unit]
+Description=Mint the factory GitHub App's tokens every 20 minutes (they live 60)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=20min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

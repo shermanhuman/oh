@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""gh as the factory App: picks the installation token for the repo's owner.
+
+On PATH ahead of the real gh (mise's global `[env] _.path`), so both
+`mise exec -- gh` and a plain `gh` reach it. An existing GH_TOKEN is passed
+through untouched (stage.sh sets its own read:packages token).
+"""
+import os
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+import forge_client  # noqa: E402
+
+
+def real_gh():
+    """The real gh, resolved at each call so a mise upgrade can't strand it (review m20)."""
+    explicit = os.environ.get("FORGE_REAL_GH")
+    if explicit:
+        return explicit
+    try:
+        out = subprocess.run(["mise", "-C", "/", "which", "gh"], capture_output=True, text=True)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except FileNotFoundError:
+        pass  # no mise (macmacmac's gh is Homebrew's)
+    for path in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"):
+        if os.path.exists(path):
+            return path
+    # Last resort: PATH without this directory, so the wrapper never calls itself.
+    rest = os.pathsep.join(p for p in os.environ.get("PATH", "").split(os.pathsep)
+                           if os.path.realpath(p) != HERE and "/shims" not in p)
+    found = shutil.which("gh", path=rest)
+    if found:
+        return found
+    sys.exit("forge gh: can't find the real gh (set FORGE_REAL_GH)")
+
+
+def main():
+    args = sys.argv[1:]
+    if os.environ.get("FORGE_GH_WRAPPED"):
+        sys.exit("forge gh: the wrapper called itself; set FORGE_REAL_GH to the real gh")
+    env = dict(os.environ, FORGE_GH_WRAPPED="1")
+    if not env.get("GH_TOKEN"):
+        try:
+            env["GH_TOKEN"] = forge_client.token(forge_client.owner_for(args))
+        except forge_client.ForgeError as e:
+            sys.exit(str(e))
+    gh = real_gh()
+    os.execve(gh, [gh] + args, env)
+
+
+if __name__ == "__main__":
+    main()

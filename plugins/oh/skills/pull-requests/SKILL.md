@@ -1,6 +1,6 @@
 ---
 name: pull-requests
-description: This machine's specifics for pull requests on top of compound-v:pull-requests — gh through mise, the second voice (Astra through Codex, or Claude Fable from Codex), recording a goal's PR for the merge poller, updating plugin installs on both machines, and Codex hook trust. Use when opening a PR, running a review round's second voice, or after a plugin PR merges.
+description: This machine's specifics for pull requests on top of compound-v:pull-requests — gh through mise as the factory GitHub App, the second voice (Astra through Codex, or Claude Fable from Codex), recording a goal's PR for the merge poller, updating plugin installs on both machines, and Codex hook trust. Use when opening a PR, running a review round's second voice, or after a plugin PR merges.
 ---
 
 # Pull requests: this machine's specifics
@@ -8,6 +8,8 @@ description: This machine's specifics for pull requests on top of compound-v:pul
 The procedure is `compound-v:pull-requests`, the bump `compound-v:release` and the reviews `compound-v:review-loop`. On this machine:
 
 - **gh always goes through mise:** `mise exec -- gh …`. In a worktree whose `mise.toml` isn't trusted, mise refuses to start: run `mise trust <worktree>/mise.toml` first, or run from outside. When watching checks right after a push, put `sleep 30 &&` before `mise exec -- gh pr checks <n> -R <owner>/<repo> --watch --interval 30` in the same background command, because GitHub needs a moment to register the runs.
+- **You act as the factory GitHub App, `mapleset-forge[bot]`.** `gh` (through mise or not) reaches oh's wrapper, which picks the App's short-lived token for the repo's owner from `-R`, a URL, an API path, a search qualifier or the current repo's `origin`; git's credential helper does the same from the URL. A caller that knows the owner but can't name it in the arguments sets `FORGE_OWNER=<owner>`. Your PRs are authored by the App, so the user can review and approve them. A token error names the minting timer: say so and stop, never work around it.
+- **Never use the user's own credentials:** their `gh` login (`gh auth login`/`switch`/`token` for their account, an unset `GH_TOKEN` to reach the keyring), `~/.kube/admin.yaml`, their gcloud login, or their browser through Claude-in-Chrome on github.com, even when it would get you past a block. A step that needs them is a task for the user, with the command written for their credentials (`KUBECONFIG=~/.kube/admin.yaml KUBE_CONTEXT=ny1 …` for admin kubectl).
 - **Watching checks from Codex:** nothing wakes the session when a background watch ends; read its output before saying anything is green.
 - **Reading a PR's state:** `mise exec -- gh pr view <n> -R <owner>/<repo> --json state,isDraft,baseRefName,mergeable,mergeStateStatus,statusCheckRollup`. `CONFLICTING`/`DIRTY` means merge the default branch in; `BLOCKED`/`UNSTABLE` means a check is red; `UNKNOWN` means not computed yet, so look again; `BEHIND` appears only where branch rules require up-to-date branches. Back to draft with `mise exec -- gh pr ready <n> --undo -R <owner>/<repo>`; retarget a stacked PR with `mise exec -- gh pr edit <n> --base <default-branch> -R <owner>/<repo>`.
 
