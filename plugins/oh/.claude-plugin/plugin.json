@@ -1,6 +1,6 @@
 {
   "name": "oh",
-  "version": "2.11.2",
+  "version": "2.11.3",
   "description": "Sherman's working agreements for Claude Code and Codex: mise first, pull requests as releases, version bumps, questions, plans and decisions on Sugarhouse (with its MCP server), a rough-edge log for skill improvement, watching your own PRs, sealed secrets through waxseal (with a guard hook), a production guard hook, a process and secrets guard hook (one specific kill at a time, no printing secret files), reviewer choices, plus release, waxseal, mise and Dockerfile skills.",
   "author": {
     "name": "Sherman Boyd",

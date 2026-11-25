@@ -1,8 +1,8 @@
 """PreToolUse guard: production actions that can't be undone.
 
 A backstop for oh's always-on Production guard rule, deliberately narrow, so
-the everyday release routine (rollout restarts, Argo refreshes, migration
-Jobs, deploy scripts) goes ahead without asking, except a destructive change inside it. It looks only at what a shell would
+the everyday release routine (a GitOps repository's stage and promote PRs,
+or rollout restarts, Argo refreshes, migration Jobs and deploy scripts) goes ahead without asking, except a destructive change inside it. It looks only at what a shell would
 execute, using the parser in shell.py.
 
 Denied, because they are always the user's step:

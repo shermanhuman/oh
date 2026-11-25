@@ -4,7 +4,7 @@ Contents: [When it applies](#when-it-applies) · [Procedure](#procedure) · [Whe
 
 ## When it applies
 
-When the app uses database migrations, every release runs the repository's migration procedure before the app restarts. That includes a release with no migrations of its own: it confirms the schema is current and pins the restart to the migrated image. Include the procedure in the handoff. Follow the repository's README where it differs.
+When the app uses database migrations, every release runs the repository's migration procedure before the app restarts. That includes a release with no migrations of its own: it confirms the schema is current and pins the restart to the migrated image. Include the procedure in the handoff. Follow the repository's README where it differs. It doesn't apply where a GitOps repository deploys the app and runs its migrations as sync hooks (breakdown-infra): there, follow `SKILL.md`'s *GitOps repositories*.
 
 ## Procedure
 
