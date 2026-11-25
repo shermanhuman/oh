@@ -58,7 +58,7 @@ class KeepGoing(unittest.TestCase):
         return self.stop(last_assistant_message=text, **kw)
 
     def test_a_turn_ending_on_a_question_is_nudged_to_post_it(self):
-        for phase in ("plan", "build"):
+        for phase in ("intent", "plan", "build"):
             r = self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.said("Done.\n\n**Shall I use the Mapleset web repos?**"))
             self.assertEqual(r["decision"], "block", phase)
             for text in ("sugar post", "can't be undone", "Only if no step can move", "carry on with your work",
@@ -67,9 +67,9 @@ class KeepGoing(unittest.TestCase):
         log = (self.state / "oh/goals/g.jsonl").read_text().splitlines()
         self.assertEqual(json.loads(log[-1])["nudge"], "question")
 
-    def test_no_question_nudge_outside_plan_and_build_or_in_plan_mode(self):
+    def test_no_question_nudge_outside_intent_plan_and_build_or_in_plan_mode(self):
         q = "What should it be called?"
-        for phase in ("intent", "paused", "done", "", "Plan"):
+        for phase in ("paused", "done", "", "Plan"):
             self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.said(q)), phase)
         self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan"}), self.said(q, permission_mode="plan")))
         self.assertIsNone(self.run_hook(dict(self.OWNED, **{"goal.phase": "plan", "blocked": "http://board.example.invalid/items/9"}), self.said(q)))

@@ -24,7 +24,7 @@ In a Herdr tab, `HC_TERMINAL_ID` names your terminal. Mark the goal on it (`hc` 
 
 `<slug>` is short and stable (`rules-release`, `sugarhouse`): letters, digits, `.`, `_` and `-`, starting with a letter or digit, 64 characters at most. The hook ignores a tab whose slug doesn't fit. Outside Herdr (no `HC_TERMINAL_ID`), skip the labels.
 
-**In the build phase, don't end a turn announcing a next step you could take now: take it.** oh's keep-going Stop hook backs this up. If the session that owns the goal ends a turn in build, with nothing blocked and no background work or scheduled wake-up pending, it sends it back once for that turn. It never pushes reviewers or other sessions. In the plan and build phases it also nudges once when the turn ends on a question to the user in the chat: post it on the board, unless the user is engaged in the tab (compound-v's *Answer where the user engages*). Answering the user's question in build is fine: answer, then carry on. The user can turn the hook off with `touch ~/.local/state/oh/keep-going.off`.
+**In the build phase, don't end a turn announcing a next step you could take now: take it.** oh's keep-going Stop hook backs this up. If the session that owns the goal ends a turn in build, with nothing blocked and no background work or scheduled wake-up pending, it sends it back once for that turn. It never pushes reviewers or other sessions. In the plan and build phases it also nudges once when the turn ends on a question to the user in the chat: post it on the board, unless compound-v's *Answer where the user engages* keeps it in the tab. Answering the user's question in build is fine: answer, then carry on. The user can turn the hook off with `touch ~/.local/state/oh/keep-going.off`.
 
 ## Tasks for the user
 

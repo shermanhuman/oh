@@ -9,8 +9,8 @@ session id>`, and `blocked=<link>` while no step can move until the user acts.
 
 It also nudges once when the goal's owner ends a turn, in the plan or build
 phase and outside plan mode, on what reads as a question to the user in the
-chat: questions go to Sugarhouse. The intent conversation is in the tab, so
-the intent phase isn't nudged.
+chat (intent, plan and build phases): compound-v's *Answer where the user
+engages* decides whether it belongs in the tab or on Sugarhouse.
 
 It pushes back at most once per turn (a turn it already continued is let through), and only when all of these hold:
 - the stopping session owns the goal, so reviewers, child sessions and a later
@@ -110,7 +110,7 @@ def decide(event, env):
     mine = bool(session and tab.get("goal.owner") == session and not tab.get("blocked") and not event.get("stop_hook_active")
                 and event.get("permission_mode") != "plan")  # in plan mode nothing can be built or posted
     try:
-        asks = mine and tab.get("goal.phase") in ("plan", "build") and ends_on_question(last_message(event))
+        asks = mine and tab.get("goal.phase") in ("intent", "plan", "build") and ends_on_question(last_message(event))
     except Exception:  # the question check never stops the log or the build nudge
         asks = False
     push = asks or (mine
@@ -128,8 +128,8 @@ def decide(event, env):
     if asks:
         return {"decision": "block", "reason": (
             "This is oh's keep-going hook, not the user: your turn seems to end on a question to the user in the chat. If it isn't "
-            "a question, carry on with your work. If the user is engaged in this tab (compound-v's *Answer where the user engages*: "
-            "this turn began with a message they typed here), end the turn as you were. Otherwise post it on Sugarhouse "
+            "a question, carry on with your work. If compound-v's *Answer where the user engages* keeps it in the tab (judge it by "
+            "the turn this message interrupted, not by this message), end the turn as you were. Otherwise post it on Sugarhouse "
             "(`~/.local/share/mise/shims/sugar post`) and follow oh's always-on section *Questions and plans go to Sugarhouse* for whether it waits for the "
             "answer or goes ahead on your default; only one that's cheap to undo goes ahead, and one that can't be undone always "
             "waits. Only if no step can move until the answer, run `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<item link>`. "
