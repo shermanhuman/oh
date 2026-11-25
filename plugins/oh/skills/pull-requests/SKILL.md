@@ -8,8 +8,6 @@ description: This machine's specifics for pull requests on top of compound-v:pul
 The procedure is `compound-v:pull-requests`, the bump `compound-v:release` and the reviews `compound-v:review-loop`. On this machine:
 
 - **gh always goes through mise:** `mise exec -- gh …`. In a worktree whose `mise.toml` isn't trusted, mise refuses to start: run `mise trust <worktree>/mise.toml` first, or run from outside. When watching checks right after a push, put `sleep 30 &&` before `mise exec -- gh pr checks <n> -R <owner>/<repo> --watch --interval 30` in the same background command, because GitHub needs a moment to register the runs.
-- **Record a goal's PR** on its tab's `goal.prs` label when you open it (`oh:goals` has the command), so Sugarhouse tells the tab once when it merges.
-- **Link the plan as well as the issue** in the PR body when the goal's plan is in Sugarhouse (keep `Closes #N`; the queue and `compound-v:next` follow it). The link is the `url` that `sugar plan show <slug>` prints.
 - **Watching checks from Codex:** nothing wakes the session when a background watch ends; read its output before saying anything is green.
 - **Reading a PR's state:** `mise exec -- gh pr view <n> -R <owner>/<repo> --json state,isDraft,baseRefName,mergeable,mergeStateStatus,statusCheckRollup`. `CONFLICTING`/`DIRTY` means merge the default branch in; `BLOCKED`/`UNSTABLE` means a check is red; `UNKNOWN` means not computed yet, so look again; `BEHIND` appears only where branch rules require up-to-date branches. Back to draft with `mise exec -- gh pr ready <n> --undo -R <owner>/<repo>`; retarget a stacked PR with `mise exec -- gh pr edit <n> --base <default-branch> -R <owner>/<repo>`.
 
@@ -21,7 +19,7 @@ Wherever the review loop calls for a second voice, and for any "Astra" review th
 mise exec -- codex exec -m gpt-6-astra -c model_reasoning_effort=high -c web_search="live" -s read-only --skip-git-repo-check -C <dir> -o <out.md> - < brief.md
 ```
 
-Tell Astra which skill to use (`compound-v:review`, `compound-v:followup` or `compound-v:plan-review`), the diff range or plan, a finding-ID prefix, and the facts already verified. Paste in what its sandbox can't reach (private issues, the rough-edge log, the plan from Sugarhouse). It can't post or call MCP tools, so post its report yourself, unchanged, under an "Astra high (Codex)" header. Don't add `--dangerously-bypass-hook-trust`. If Codex fails or is unavailable, fall back as the review loop says and note it on the PR.
+Tell Astra which skill to use (`compound-v:review`, `compound-v:followup` or `compound-v:plan-review`), the diff range or plan, a finding-ID prefix, and the facts already verified. Paste in what its sandbox can't reach (private issues, and anything from the user's board or logs). It can't post or call MCP tools, so post its report yourself, unchanged, under an "Astra high (Codex)" header. Don't add `--dangerously-bypass-hook-trust`. If Codex fails or is unavailable, fall back as the review loop says and note it on the PR.
 
 When you are the Codex session, a fresh reviewer is a separate background `codex exec` with the brief on stdin, and the second voice is Claude with web access: `claude -p --model fable --allowedTools "WebSearch,WebFetch" < brief.md`.
 
