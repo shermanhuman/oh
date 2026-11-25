@@ -61,7 +61,8 @@ class KeepGoing(unittest.TestCase):
         for phase in ("plan", "build"):
             r = self.run_hook(dict(self.OWNED, **{"goal.phase": phase}), self.said("Done.\n\n**Shall I use the Mapleset web repos?**"))
             self.assertEqual(r["decision"], "block", phase)
-            for text in ("sugar post", "can't be undone", "Only if no step can move", "carry on"):
+            for text in ("sugar post", "can't be undone", "Only if no step can move", "carry on with your work",
+                         "end the turn as you were", "not the user"):
                 self.assertIn(text, r["reason"])
         log = (self.state / "oh/goals/g.jsonl").read_text().splitlines()
         self.assertEqual(json.loads(log[-1])["nudge"], "question")
