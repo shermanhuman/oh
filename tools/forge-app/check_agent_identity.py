@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that an agent shell's defaults resolve to the factory App and the view kubeconfig.
+"""Check that an agent shell's defaults resolve to the `mapleset-forge` App and the view kubeconfig.
 
 Run it in an agent shell (Claude Code and Codex, on each machine). Prints one
 line per probe and exits non-zero if any fails. Never prints a credential.
@@ -9,7 +9,7 @@ Probes:
                  account, which only an installation token can do
   git <repo>     `git ls-remote` over HTTPS works for a repo of each account
   committer      git's global committer is the App's bot
-  kubectl        `kubectl auth whoami` is the factory-agent ServiceAccount
+  kubectl        `kubectl auth whoami` is the agent-view ServiceAccount
   kubeconfig     ~/.kube/config holds no system:masters certificate for ny1
                  (a local cluster's, such as rancher-desktop, is allowed)
   app key        no file under $HOME holds the App's private key (by the
@@ -63,7 +63,7 @@ def probe_kubectl():
     if r.returncode != 0:
         return False, r.stderr.strip()[:200]
     user = json.loads(r.stdout).get("status", {}).get("userInfo", {}).get("username", "")
-    return user.endswith(":factory-agent"), user
+    return user.endswith(":agent-view"), user
 
 
 def masters_for_ny1(kubeconfig_path):

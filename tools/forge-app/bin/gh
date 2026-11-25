@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gh as the factory App: picks the installation token for the repo's owner.
+"""gh as the `mapleset-forge` App: picks the installation token for the repo's owner.
 
 On PATH ahead of the real gh (mise's global `[env] _.path`), so both
 `mise exec -- gh` and a plain `gh` reach it. An existing GH_TOKEN is passed

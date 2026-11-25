@@ -1,4 +1,4 @@
-# forge-app: agents act as the factory GitHub App
+# forge-app: agents act as the `mapleset-forge` GitHub App
 
 Agents (Claude Code and Codex, on soulglow and macmacmac) reach GitHub as the
 `mapleset-forge` App instead of the owner's account, and ny1 through a

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Switch this machine's user (s) to the factory App identity, or back.
+"""Switch this machine's user (s) to the `mapleset-forge` App identity, or back.
 
   setup_agent.py                  install the client and switch git and gh
   setup_agent.py --kube VIEW.yaml also move the admin kubeconfig to

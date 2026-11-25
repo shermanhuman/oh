@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent side of the factory App identity: which token, for which owner.
+"""Agent side of the `mapleset-forge` App identity: which token, for which owner.
 
 Used by the `gh` wrapper and `git-credential-forge`, and as a CLI:
   forge_client.py token [OWNER]     print a valid token for OWNER's installation

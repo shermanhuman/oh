@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mint short-lived installation tokens for the factory's GitHub App.
+"""Mint short-lived installation tokens for the `mapleset-forge` GitHub App.
 
 Runs as the `forge-app` system user (systemd timer, every 20 minutes). It is the
 only code that reads the App's private key. For each named account it writes

@@ -1,5 +1,5 @@
 [Unit]
-Description=Mint the factory GitHub App's tokens every 20 minutes (they live 60)
+Description=Mint the mapleset-forge GitHub App's tokens every 20 minutes (they live 60)
 
 [Timer]
 OnBootSec=1min

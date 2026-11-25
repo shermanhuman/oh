@@ -1,5 +1,5 @@
 [Unit]
-Description=Mint the factory GitHub App's installation tokens
+Description=Mint the mapleset-forge GitHub App's installation tokens
 After=network-online.target
 Wants=network-online.target
 
