@@ -11,7 +11,7 @@ Named after [Sadaharu Oh](https://en.wikipedia.org/wiki/Sadaharu_Oh) — the gre
 
 | Plugin | What it holds | Where it's on |
 |---|---|---|
-| `oh` | The always-on working agreements below, the `sugarhouse` MCP server (`sugar mcp`, read-only plans and decisions), and the skills `pull-requests` (this machine's specifics behind compound-v's procedure), `release`, `mise`, `waxseal`, `dockerfile`, `rough-edges` (the rough-edge log) and `mapleset-design` (web UI rules across Mapleset's brands) | everywhere |
+| `oh` | The always-on working agreements below, the `sugarhouse` MCP server (`sugar mcp`, read-only plans and decisions), and the skills `pull-requests` (this machine's specifics behind compound-v's procedure), `release`, `mise`, `waxseal`, `dockerfile`, `goals` (Herdr goal labels and tasks for the user) and `rough-edges` (the rough-edge log) | everywhere |
 | `oh-phoenix` | `phoenix` (LiveView, Ecto, migrations, architecture and testing references), `daisyui` | Elixir repositories |
 | `oh-tekmetric` | `tekmetric-api` with the full endpoint catalog | repositories that sync Tekmetric |
 | `oh-telnyx` | `telnyx-call-control` | voice/SMS repositories |
@@ -90,8 +90,9 @@ MIT License — Copyright (c) 2026 Sherman Boyd
 
 ## Changelog
 
-- oh 2.12.0: new skill `oh:mapleset-design`, Mapleset's web UI rules across its brands: DaisyUI and Lucide everywhere, which brand a project uses, where each brand package lives and how brandkit installs it, per-brand rules, and how UI picks are shown. oh-phoenix 1.0.1: the `daisyui` guide drops `shadow` from its dropdown snippet, takes themes from the brand package, and explains `row-hover`.
+- oh-phoenix 1.0.2: the `daisyui` guide points a project without a brand package at brandkit's `brand` and `design` skills instead of the dropped `mapleset-design`, and its "⚠️ CRITICAL GOTCHAS" heading becomes "Drawer gotchas", numbered 1 to 4.
 - oh 2.11.1: mid-work questions go to the board, never the chat, except the four conversations that stay in the tab. Only a question that's cheap to undo goes ahead on a default; the rest are posted as `critical` and wait, with the work they don't touch carrying on. A step that's the user's (a merge, a push) is a board task with only its link in the chat. keep-going nudges once when the goal's owner ends a turn on a question in the plan or build phase, outside plan mode.
+- oh-phoenix 1.0.1: the `daisyui` guide drops `shadow` from its dropdown snippet, takes themes from the project's brand package (brandkit) where it has one, and explains `row-hover`.
 - oh 2.11.0: Sugarhouse is the board, the plan store and the decision store: *Questions* posts items with `sugar`, tasks for the user are task items, a goal's PRs go on its `goal.prs` label for the merge poller, its type on `goal.type`, and the `sugarhouse` MCP server ships in the plugin. The generic PR procedure, release prep, tasks for the user, the rough-edge kinds and the merge, rebase and refusal rules moved to compound-v (2.11.0); `pull-requests`, `release` and `rough-edges` keep this machine's specifics. While Sugarhouse is down, answers are kept on a local page and written to the board later, and a plan's approval waits for the board.
 - oh 2.10.2: follow-up rounds and plan re-reviews after revisions run on Opus high; whole-diff rounds and a plan's first review stay on Fable high (a revision that changes scope or approach counts as a first review). Cuts Fable use, most of which went to repeat rounds.
 - oh 2.10.1: a step waiting on the user doesn't stop the goal; the agent keeps working on what can move and sets `blocked` only when nothing can.
