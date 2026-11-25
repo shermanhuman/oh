@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Stop hook (Claude Code and Codex): one nudge for an agent that ends its turn
 in its goal's build phase with work left, or on a question to the user in the
-chat in the plan or build phase.
+chat in the intent, plan or build phase.
 
 An agent working toward a goal carries Herdr tab labels (the `oh:goals` skill):
 `goal=<slug>`, `goal.phase=intent|plan|build|paused|done`, `goal.owner=<its
 session id>`, and `blocked=<link>` while no step can move until the user acts.
 
-It also nudges once when the goal's owner ends a turn, in the plan or build
+It also nudges once when the goal's owner ends a turn, in the intent, plan or build
 phase and outside plan mode, on what reads as a question to the user in the
-chat: questions go to Sugarhouse. The intent conversation is in the tab, so
-the intent phase isn't nudged.
+chat: compound-v's *Answer where the user
+engages* decides whether it belongs in the tab or on Sugarhouse.
 
 It pushes back at most once per turn (a turn it already continued is let through), and only when all of these hold:
 - the stopping session owns the goal, so reviewers, child sessions and a later
@@ -110,7 +110,7 @@ def decide(event, env):
     mine = bool(session and tab.get("goal.owner") == session and not tab.get("blocked") and not event.get("stop_hook_active")
                 and event.get("permission_mode") != "plan")  # in plan mode nothing can be built or posted
     try:
-        asks = mine and tab.get("goal.phase") in ("plan", "build") and ends_on_question(last_message(event))
+        asks = mine and tab.get("goal.phase") in ("intent", "plan", "build") and ends_on_question(last_message(event))
     except Exception:  # the question check never stops the log or the build nudge
         asks = False
     push = asks or (mine
@@ -127,9 +127,9 @@ def decide(event, env):
         return None
     if asks:
         return {"decision": "block", "reason": (
-            "Your turn seems to end on a question to the user in the chat. If it isn't one, or it's one of the conversations that "
-            "stay in the tab (the intent conversation, talking a decision through when the user asks to, `compound-v:next`'s pick, "
-            "the \"what's missing\" ask after More discussion), carry on. Otherwise post it on Sugarhouse "
+            "This is oh's keep-going hook, not the user: your turn seems to end on a question to the user in the chat. If it isn't "
+            "a question, carry on with your work. If compound-v's *Answer where the user engages* keeps it in the tab (judge it by "
+            "the turn this message interrupted, not by this message), end the turn as you were. Otherwise post it on Sugarhouse "
             "(`~/.local/share/mise/shims/sugar post`) and follow oh's always-on section *Questions and plans go to Sugarhouse* for whether it waits for the "
             "answer or goes ahead on your default; only one that's cheap to undo goes ahead, and one that can't be undone always "
             "waits. Only if no step can move until the answer, run `~/.local/bin/hc label $HC_TERMINAL_ID blocked=<item link>`. "
