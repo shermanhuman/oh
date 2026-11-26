@@ -11,10 +11,12 @@ a shell would execute, never at code or prose. It refuses:
   versions list|describe and locations, with one exception: a made-up staging
   value, generated in the same pipe that stores it and never printed (the
   owner's decision D-3462, 2026-11-26). Exactly
-  `openssl rand <-hex|-base64> <n> [| tr -d '\n'] | gcloud secrets versions add
-  staging-<entry> --data-file=- --project=waxseal-infra-secrets`: no other
-  stage, no redirect or tee, no command substitution, a literal entry name
-  starting `staging-`, and the project given;
+  `openssl rand -hex|-base64 <n of 16 or more> | tr -d '\n' | gcloud secrets
+  versions add staging-<entry> --data-file=- --project=waxseal-infra-secrets`,
+  and the whole command must be such pipes and `versions list` calls and
+  nothing else (optionally inside a bare `bash -c`): no other statement,
+  function, alias, assignment, redirect, subshell, substitution, variable or
+  glob, any of which could change what the pipe does (oh#58 round 1);
 - a Secret Manager URL handed to curl/wget/http/xh, directly or through a
   variable set in the same command.
 
@@ -68,7 +70,7 @@ GCLOUD_READS = (["list"], ["describe"], ["get-iam-policy"], ["versions", "list"]
 # The one write (D-3462): a made-up value for a staging entry, in this project.
 MADE_UP_PROJECT = "waxseal-infra-secrets"
 MADE_UP_ENTRY = re.compile(r"staging-[A-Za-z0-9_-]+")
-OPENSSL_RAND = re.compile(r"-hex|-base64|\d+")
+MADE_UP_MIN_BYTES = 16
 DEPTH = 4
 
 KUBESEAL = "runs kubeseal"
@@ -91,20 +93,16 @@ def gcloud_words(args):
     return words
 
 
-def is_versions_add(argv):
-    return bool(argv) and argv[0] == "gcloud" and gcloud_words(argv[1:])[:3] == ["secrets", "versions", "add"]
-
-
 def made_up_add(argv):
     """gcloud secrets versions add staging-<entry> --data-file=- --project=<ours>, nothing else."""
-    if not argv or argv[0] != "gcloud" or argv[1:4] != ["secrets", "versions", "add"]:
+    if argv[:4] != ["gcloud", "secrets", "versions", "add"]:
         return False
-    rest, entry, data, project, i = argv[4:], None, None, None, 0
+    entry, data, project, rest, i = None, None, None, argv[4:], 0
     while i < len(rest):
         arg = rest[i]
-        if arg.startswith("--data-file") or arg.startswith("--project"):
-            name, _, value = arg.partition("=")
-            if not _:
+        name, eq, value = arg.partition("=")
+        if name in ("--data-file", "--project"):
+            if not eq:
                 if i + 1 >= len(rest):
                     return False
                 value, i = rest[i + 1], i + 1
@@ -122,30 +120,53 @@ def made_up_add(argv):
     return bool(entry and MADE_UP_ENTRY.fullmatch(entry)) and data == "-" and project == MADE_UP_PROJECT
 
 
-def made_up_pipeline(stages):
-    """openssl rand [| tr -d '\n'] | gcloud ... add: no redirects, nothing else."""
-    if any(redirects for _, redirects, _ in stages):
+def made_up_statement(stages):
+    """`openssl rand -hex|-base64 <n> | tr -d '\\n' | gcloud ... add ...`, or `gcloud secrets versions list ...`."""
+    if len(stages) == 1:
+        return stages[0][:4] == ["gcloud", "secrets", "versions", "list"]
+    if len(stages) != 3 or stages[1] != ["tr", "-d", "\\n"] or not made_up_add(stages[2]):
         return False
-    argvs = [argv for argv, _, _ in stages]
-    if not 2 <= len(argvs) <= 3 or not made_up_add(argvs[-1]):
-        return False
-    first = argvs[0]
-    if first[:2] != ["openssl", "rand"] or not first[2:] or not all(OPENSSL_RAND.fullmatch(a) for a in first[2:]):
-        return False
-    return len(argvs) == 2 or argvs[1] == ["tr", "-d", "\\n"]
+    rand = stages[0]
+    return (len(rand) == 4 and rand[:2] == ["openssl", "rand"] and rand[2] in ("-hex", "-base64")
+            and rand[3].isdigit() and int(rand[3]) >= MADE_UP_MIN_BYTES)
 
 
-def pipelines(main):
-    """The text's pipelines, each a list of (argv, redirects, end) stages."""
-    out, current = [], []
-    for stage in shell.piped_commands(main):
-        current.append(stage)
-        if stage[2] != "|":
-            out.append(current)
-            current = []
-    if current:
-        out.append(current)
-    return out
+def made_up_text(text, depth=0):
+    """True only when the whole text is D-3462's made-up staging value, with
+    nothing beside it: one or more exact pipes or version listings, joined by
+    `;`, `&&` or newlines, optionally as the one argument of a bare `bash -c`.
+    No other statement, function, alias, assignment, redirect, subshell,
+    process or command substitution, variable or glob can sit next to it and
+    change what the pipe does."""
+    if depth > 1 or not text or len(text) > MAX_TEXT:
+        return False
+    try:
+        tokens = shell.lex(text)
+    except Exception:
+        return False
+    words = [v for kind, v in tokens if kind == "word"]
+    if len(tokens) == 3 and len(words) == 3 and words[0] in ("bash", "sh") and words[1] in ("-c", "-lc"):
+        return made_up_text(words[2], depth + 1)
+    statements, stages, argv = [], [], []
+    for kind, value in tokens + [("op", ";")]:
+        if kind == "word":
+            if ASSIGNMENT.match(value) or re.search(r"[$`*?\[\]{}~]", value):
+                return False
+            argv.append(value)
+        elif kind == "op" and value in ("|", ";", "\n", "&&"):
+            if not argv:
+                if value == "|" or stages:
+                    return False
+                continue
+            stages.append(argv)
+            argv = []
+            if value != "|":
+                statements.append(stages)
+                stages = []
+        else:
+            return False
+    adds = [s for s in statements if len(s) == 3]
+    return bool(adds) and all(made_up_statement(s) for s in statements)
 
 
 def argv_reason(argv, cwd, depth):
@@ -228,10 +249,6 @@ def reason_for(text, cwd, depth=0):
         if why:
             return why
     commands, substs = simple_commands(main)
-    # D-3462's made-up staging value. Allowed only when every `versions add` in
-    # this text is one, and the text has no command substitution to hide in.
-    adds = [p for p in pipelines(main) if any(is_versions_add(program(argv)) for argv, _, _ in p)]
-    made_up = bool(adds) and not substs and all(made_up_pipeline(p) for p in adds)
     for inner in substs:
         why = reason_for(inner, cwd, depth + 1)
         if why:
@@ -243,8 +260,6 @@ def reason_for(text, cwd, depth=0):
             if any(f"${n}" in arg or f"${{{n}}}" in arg for n in names for arg in argv[1:]):
                 return API
     for argv in commands:
-        if made_up and argv[:4] == ["gcloud", "secrets", "versions", "add"]:
-            continue
         why = argv_reason(argv, cwd, depth)
         if why:
             return why
@@ -273,7 +288,10 @@ def decide(event):
         cwd = os.getcwd()
     if exempt(cwd):
         return None
-    why = reason_for(command_text(event.get("tool_input")), cwd)
+    text = command_text(event.get("tool_input"))
+    if made_up_text(text):
+        return None
+    why = reason_for(text, cwd)
     if not why:
         return None
     return (
