@@ -1,5 +1,6 @@
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -56,7 +57,54 @@ DENIED = [
     "printf '%s\\n' '# status'; kubeseal --fetch-cert",
     "curl https://secretmanager.googleapis.com:443/v1/projects/p/secrets/s/versions/latest:access",
     "curl https://secretmanager.us-central1.rep.googleapis.com/v1/projects/p/locations/us-central1/secrets/s/versions/1:access",
+    "echo \"v=`kubeseal --version`\"",
     "BASE=https://secretmanager.googleapis.com/v1; curl -H \"Authorization: Bearer $T\" \"$BASE/projects/p/secrets/s/versions/latest:access\"",
+]
+
+# Ways past the guard that bash really runs (oh#59 and its comments, plus the
+# same classes found while fixing them): (label, command, whether the bash
+# oracle below can run it). `{BIN}` is the directory holding gcloud.
+ACCESS = "secrets versions access latest --secret=x"
+HOLES = [
+    ("1 pipe+redirect <", f"true |</dev/null gcloud {ACCESS}", True),
+    ("1 amp+redirect <", f"true &</dev/null gcloud {ACCESS}", True),
+    ("1 pipe+redirect >", f"true |>/dev/null gcloud {ACCESS}", True),
+    ("2 quoted <<", f": '<<EOF'\ngcloud {ACCESS}", True),
+    ("2 arithmetic <<", f"echo $((1<<n))\ngcloud {ACCESS}", True),
+    ("3 ansi-c quote", f": $'\\''; gcloud {ACCESS}; : $'\\''", True),
+    ("4 --no-log-http", f"gcloud --no-log-http {ACCESS}", True),
+    ("4 --no-quiet", f"gcloud --no-quiet {ACCESS}", True),
+    ("5 variable program", f"g=gcloud; $g {ACCESS}", True),
+    ("6 CR comment", f"true\r#; gcloud {ACCESS}", True),
+    ("7 dq backslash-newline", f"bash -c \"true\\\n#; gcloud {ACCESS}\"", True),
+    ("8 over MAX_TEXT", f"gcloud {ACCESS}; : " + "a" * 256_001, True),
+    ("d8 here-string <<<", f"cat <<<EOF\ngcloud {ACCESS}\nEOF", True),
+    ("d8 delimiter EOF\"X\"", f"cat <<EOF\"X\"\nbody\nEOFX\ngcloud {ACCESS}\nEOF", True),
+    ("d8 brace program", f"{{gcloud,}} {ACCESS}", True),
+    ("d8 function \"$@\"", f"g() {{ gcloud \"$@\"; }}; g {ACCESS}", True),
+    ("d8 alias", f"shopt -s expand_aliases\nalias g=gcloud\ng {ACCESS}", True),
+    ("d8 hash -p", f"hash -p {{BIN}}/gcloud g; g {ACCESS}", True),
+    ("d8 env -S", f"env -S 'gcloud {ACCESS}'", True),
+    ("d8 flock -c", f"flock /tmp/guard-holes.lock -c 'gcloud {ACCESS}'", True),
+    ("d8 script -c", f"script -qc 'gcloud {ACCESS}' /dev/null", True),
+    ("d8 su -c", f"su -c 'gcloud {ACCESS}' deploy", False),
+    ("d8 runuser -c", f"runuser -u deploy -- sh -c 'gcloud {ACCESS}'", False),
+    ("d8 pipe into bash", f"echo 'gcloud {ACCESS}' | bash", True),
+    ("d8 bash -s here-string", f"bash -s <<< 'gcloud {ACCESS}'", True),
+    ("d8 xargs bare gcloud", f"echo '{ACCESS}' | xargs gcloud", True),
+    ("d8 find -exec", f"find . -maxdepth 0 -exec gcloud {ACCESS} \;", True),
+    ("d8 bash -c -o", f"bash -c -o pipefail 'gcloud {ACCESS}'", True),
+    ("d8 subst program", f"$(echo gcloud) {ACCESS}", True),
+    ("d8 backtick program", f"`echo gcloud` {ACCESS}", True),
+    ("d8 dq substitution", f"echo \"$(gcloud {ACCESS})\"", True),
+    ("d8 variable group word", f"s=secrets; gcloud $s versions access latest --secret=x", True),
+]
+
+# Refused only because they mention Secret Manager in text the guard can't read for certain.
+UNSURE_DENIED = [
+    "echo \"unclosed; gcloud secrets list",
+    "$CMD --version; gcloud secrets list",
+    "bash <<< 'gcloud secrets list'",
 ]
 
 # Everyday commands that only mention these tools, or read metadata.
@@ -115,15 +163,26 @@ ALLOWED = [
     "go test ./... -run TestSeal -count=1",
     "python3 -m pytest tests/ -k secret",
     "node -e 'console.log(1 << 3)'",
+    "git commit -m \"$(cat <<'EOF'\nguard: gcloud secrets versions access is refused\nEOF\n)\"",
+    "gh pr create --title \"secrets guard fixes\" --body \"$(cat <<'EOF'\n## gcloud secrets versions access\nnow refused (it's a hole)\nEOF\n)\"",
+    "kubectl get secrets -n $ns",
+    "$EDITOR secrets.yaml",
+    "cat .claude/rules/secrets.md",
+    "gcloud secrets --format json versions list foo",
+    "gcloud --no-user-output-enabled secrets versions describe 3 --secret=foo --format='value(state)'",
+    "bash <<'EOF'\ngcloud secrets list\nEOF",
+    "gcloud secrets list && cat <<'EOF' | bash\necho ok\nEOF",
+    "echo $((1<<3)); gcloud secrets list",
+    "echo \"it's fine; gcloud is only mentioned",
+    "find . -name '*.yaml' -exec grep -l secrets {} +",
+    "which gcloud && gcloud secrets list",
 ]
 
-# Outside the guard's scope by design (the always-on rule still forbids them):
-# interpreter code, and text inside double quotes.
+# Outside the guard's scope by design (the rule still forbids them): interpreter code.
 NOT_COVERED = [
     "python3 - <<'PY'\nfrom google.cloud import secretmanager\nc.access_secret_version(name=n)\nPY",
     "node - <<'EOF'\nconst [v] = await client.accessSecretVersion({name});\nEOF",
     "python3 -c \"import subprocess; subprocess.run(['gcloud','secrets','versions','access','latest'])\"",
-    "echo \"v=`kubeseal --version`\"",
 ]
 
 
@@ -145,7 +204,49 @@ class Guard(unittest.TestCase):
                 out = run(command)
                 self.assertIsNotNone(out)
                 self.assertEqual(out["permissionDecision"], "deny")
-                self.assertIn("waxseal", out["permissionDecisionReason"])
+                reason = out["permissionDecisionReason"]
+                self.assertIn("External Secrets Operator", reason)
+                self.assertIn("`.claude/rules/secrets.md`", reason)
+                self.assertNotIn("waxseal CLI", reason)
+
+    def test_holes_denied(self):
+        for label, command, _ in HOLES:
+            with self.subTest(label):
+                out = run(command.replace("{BIN}", "/usr/lib/google-cloud-sdk/bin"))
+                self.assertIsNotNone(out)
+                self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_unsure_denied(self):
+        for command in UNSURE_DENIED:
+            with self.subTest(command=command):
+                out = run(command)
+                self.assertIsNotNone(out)
+                self.assertIn("can't read for certain", out["permissionDecisionReason"])
+                self.assertIn("write it more plainly", out["permissionDecisionReason"])
+
+    @unittest.skipUnless(shutil.which("bash"), "needs bash")
+    def test_holes_are_real(self):
+        """Each hole, run in bash with a stand-in gcloud, really reaches `gcloud secrets versions access`."""
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            stubs, log, work = root / "bin", root / "log", root / "work"
+            stubs.mkdir()
+            work.mkdir()
+            gcloud = stubs / "gcloud"
+            gcloud.write_text(f'#!/bin/sh\necho "$*" >> {log}\n')
+            gcloud.chmod(0o755)
+            for label, command, oracle in HOLES:
+                if not oracle:
+                    continue
+                with self.subTest(label):
+                    log.write_text("")
+                    script = root / "command.sh"
+                    script.write_text(command.replace("{BIN}", str(stubs)))
+                    subprocess.run(
+                        ["env", "-i", f"PATH={stubs}:/usr/bin:/bin", "bash", str(script)],
+                        cwd=work, capture_output=True, stdin=subprocess.DEVNULL, timeout=20,
+                    )
+                    self.assertIn("secrets versions access", log.read_text())
 
     def test_allowed(self):
         for command in ALLOWED:

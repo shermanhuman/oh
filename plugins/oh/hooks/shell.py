@@ -54,7 +54,392 @@ def split_heredocs(text):
 
 
 class Unparsed(ValueError):
-    pass
+    """Text that doesn't lex. With `lex_exact`, `kind` and `start` name the
+    construct left open (squote, dquote, subst, arith, param) and where its
+    content starts, and `inner` is the construct open inside it, if any."""
+
+    def __init__(self, why, kind=None, start=None, inner=None):
+        super().__init__(why)
+        self.kind, self.start, self.inner = kind, start, inner
+
+
+class Expanded(str):
+    """A word bash may change before it runs: it holds a parameter, a command
+    substitution, a glob or a brace. Compares equal to its text."""
+
+
+# Bash's operators, longest first, so `|<` is `|` then `<` and `>|` is one redirect.
+OPERATORS = (
+    ";;&", "&>>", "<<<", "<<-", ";;", ";&", "&&", "||", "|&", "&>", "<<", ">>", ">|", "<>", "<&", ">&",
+    "|", "&", ";", "<", ">", "(", ")", "\n",
+)
+ANSI_ESCAPES = {
+    "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n", "r": "\r", "t": "\t",
+    "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?",
+}
+PARAMETER_START = re.compile(r"[A-Za-z0-9_{@*#?$!-]")
+
+
+def ansi_c(body):
+    """The value of a $'...' string's body."""
+    out, i, n = [], 0, len(body)
+    while i < n:
+        c = body[i]
+        if c != "\\" or i + 1 >= n:
+            out.append(c)
+            i += 1
+            continue
+        e = body[i + 1]
+        if e in ANSI_ESCAPES:
+            out.append(ANSI_ESCAPES[e])
+            i += 2
+        elif e in "01234567":
+            digits = re.match(r"[0-7]{1,3}", body[i + 1:]).group()
+            out.append(chr(int(digits, 8) & 0xFF))
+            i += 1 + len(digits)
+        elif e in "xuU":
+            width = {"x": 2, "u": 4, "U": 8}[e]
+            digits = re.match(r"[0-9A-Fa-f]{0,%d}" % width, body[i + 2:]).group()
+            out.append(chr(int(digits, 16)) if digits else "\\" + e)
+            i += 2 + len(digits)
+        elif e == "c" and i + 2 < n:
+            out.append(chr(ord(body[i + 2]) & 0x1F))
+            i += 3
+        else:
+            out.append("\\" + e)
+            i += 2
+    return "".join(out)
+
+
+def _squote_end(text, i):
+    """Index of the ' closing the one at i."""
+    close = text.find("'", i + 1)
+    if close < 0:
+        raise Unparsed("open single quote", "squote", i + 1)
+    return close
+
+
+def _ansi_end(text, i):
+    """Index of the ' closing the $' at i."""
+    k, n = i + 2, len(text)
+    while k < n and text[k] != "'":
+        k += 2 if text[k] == "\\" else 1
+    if k >= n:
+        raise Unparsed("open $'", "squote", i + 2)
+    return k
+
+
+def _backtick_end(text, i):
+    """Index of the ` closing the one at i (a backslash escapes the next character)."""
+    k, n = i + 1, len(text)
+    while k < n and text[k] != "`":
+        k += 2 if text[k] == "\\" else 1
+    if k >= n:
+        raise Unparsed("open backtick", "subst", i + 1)
+    return k
+
+
+def _dquote_end(text, i):
+    """Index of the " closing the one at i, skipping what's nested inside."""
+    k, n = i + 1, len(text)
+    try:
+        while k < n and text[k] != '"':
+            k = _skip_nested(text, k, quoted=True)
+    except Unparsed as inner:
+        raise Unparsed("open double quote", "dquote", i + 1, inner)
+    if k >= n:
+        raise Unparsed("open double quote", "dquote", i + 1)
+    return k
+
+
+def _skip_nested(text, k, quoted=False):
+    """Index after the character or nested construct at k."""
+    c = text[k]
+    if c == "\\":
+        return k + 2
+    if c == "`":
+        return _backtick_end(text, k) + 1
+    if c == "$" and text[k + 1:k + 2] == "(":
+        arith = _arith_end(text, k + 1)
+        return arith if arith else _subst_end(text, k + 2) + 1
+    if c == "$" and text[k + 1:k + 2] == "{":
+        return _param_end(text, k + 2) + 1
+    if not quoted and c == "'":
+        return _squote_end(text, k) + 1
+    if not quoted and c == "$" and text[k + 1:k + 2] == "'":
+        return _ansi_end(text, k) + 1
+    if not quoted and c == '"':
+        return _dquote_end(text, k) + 1
+    return k + 1
+
+
+def _subst_end(text, i):
+    """Index of the ) closing a $( whose content starts at i."""
+    depth, k, n = 1, i, len(text)
+    try:
+        while k < n:
+            c = text[k]
+            if c == "#" and (k == i or text[k - 1] in " \t\n;|&("):
+                end = text.find("\n", k)
+                k = n if end < 0 else end
+            elif c == "(":
+                depth, k = depth + 1, k + 1
+            elif c == ")":
+                depth -= 1
+                if not depth:
+                    return k
+                k += 1
+            else:
+                k = _skip_nested(text, k)
+    except Unparsed as inner:
+        raise Unparsed("open $(", "subst", i, inner)
+    raise Unparsed("open $(", "subst", i)
+
+
+def _param_end(text, i):
+    """Index of the } closing a ${ whose content starts at i."""
+    depth, k, n = 1, i, len(text)
+    try:
+        while k < n:
+            c = text[k]
+            if c == "{":
+                depth, k = depth + 1, k + 1
+            elif c == "}":
+                depth -= 1
+                if not depth:
+                    return k
+                k += 1
+            else:
+                k = _skip_nested(text, k)
+    except Unparsed as inner:
+        raise Unparsed("open ${", "param", i, inner)
+    raise Unparsed("open ${", "param", i)
+
+
+def _arith_end(text, i):
+    """For `((` at i (or the `((` of `$((` at i): the index after its `))`, or
+    None when it isn't arithmetic (bash then reads nested subshells)."""
+    if text[i:i + 2] != "((":
+        return None
+    depth, k, n = 2, i + 2, len(text)
+    try:
+        while k < n:
+            c = text[k]
+            if c == "(":
+                depth, k = depth + 1, k + 1
+            elif c == ")":
+                if depth == 2:
+                    return k + 2 if text[k + 1:k + 2] == ")" else None
+                depth, k = depth - 1, k + 1
+            else:
+                k = _skip_nested(text, k)
+    except Unparsed as inner:
+        raise Unparsed("open ((", "arith", i + 2, inner)
+    raise Unparsed("open ((", "arith", i + 2)
+
+
+def _inner_substs(text, start, end, quoted=False):
+    """(start, end) of each command substitution inside text[start:end], the
+    content of an arithmetic or ${...} expansion, which bash still runs."""
+    spans, k = [], start
+    while k < end:
+        c, nxt = text[k], text[k + 1:k + 2]
+        if c == "\\":
+            k += 2
+        elif c == "`":
+            close = _backtick_end(text, k)
+            spans.append((k + 1, close))
+            k = close + 1
+        elif c == "$" and nxt == "(":
+            arith = _arith_end(text, k + 1)
+            if arith:
+                spans += _inner_substs(text, k + 3, arith - 2)
+                k = arith
+            else:
+                close = _subst_end(text, k + 2)
+                spans.append((k + 2, close))
+                k = close + 1
+        elif c == "$" and nxt == "{":
+            close = _param_end(text, k + 2)
+            spans += _inner_substs(text, k + 2, close)
+            k = close + 1
+        elif c == '"' and not quoted:
+            close = _dquote_end(text, k)
+            spans += _inner_substs(text, k + 1, close, quoted=True)
+            k = close + 1
+        elif c == "'" and not quoted:
+            k = _squote_end(text, k) + 1
+        elif c == "$" and nxt == "'" and not quoted:
+            k = _ansi_end(text, k) + 1
+        else:
+            k += 1
+    return spans
+
+
+def lex_exact(text, marks=None):
+    """Like `lex`, but reading the text the way bash does where `lex` doesn't:
+    operators by bash's longest match (`|<` is `|` then `<`); CR is part of a
+    word; inside double quotes a backslash is removed only before $ ` " \\ and
+    newline, `\\`+newline vanishes, and `$(...)` and backticks are substitutions;
+    `$'...'` is decoded; `$((...))`, `((...))` and `${...}` are one word part,
+    with the substitutions inside them still reported. A word bash may change
+    is an `Expanded`. With a list as `marks`, also appends ("word", start, end,
+    value) and ("comment", start, end) as it goes, so they survive an Unparsed."""
+    out, word, i, n = [], [], 0, len(text)
+    state = {"started": False, "expanded": False, "start": 0}
+    marks = marks if marks is not None else []
+
+    def begin(at):
+        if not state["started"]:
+            state["started"], state["start"] = True, at
+
+    def end_word(at):
+        if state["started"]:
+            value = "".join(word)
+            value = Expanded(value) if state["expanded"] else value
+            out.append(("word", value))
+            marks.append(("word", state["start"], at, value))
+        word.clear()
+        state["started"] = state["expanded"] = False
+
+    def subst(start, end):
+        out.append(("subst", text[start:end]))
+        marks.append(("subst", start, end))
+
+    def dollar(k):
+        """A $-expansion at k: returns the index after it, or None for a plain $."""
+        nxt = text[k + 1:k + 2]
+        if nxt == "(":
+            arith = _arith_end(text, k + 1)
+            if arith:
+                for span in _inner_substs(text, k + 3, arith - 2):
+                    subst(*span)
+                end = arith
+            else:
+                close = _subst_end(text, k + 2)
+                subst(k + 2, close)
+                end = close + 1
+        elif nxt == "{":
+            close = _param_end(text, k + 2)
+            for span in _inner_substs(text, k + 2, close):
+                subst(*span)
+            end = close + 1
+        elif nxt and PARAMETER_START.match(nxt):
+            end = k + 2
+        else:
+            return None
+        word.append(text[k:end])
+        state["expanded"] = True
+        return end
+
+    while i < n:
+        c = text[i]
+        if c in " \t":
+            end_word(i)
+            i += 1
+        elif c == "\\":
+            begin(i)
+            if text[i + 1:i + 2] == "\n":
+                i += 2
+            elif i + 1 < n:
+                word.append(text[i + 1])
+                i += 2
+            else:
+                word.append("\\")
+                i += 1
+        elif c == "'":
+            begin(i)
+            close = _squote_end(text, i)
+            word.append(text[i + 1:close])
+            i = close + 1
+        elif c == "$" and text[i + 1:i + 2] == "'":
+            begin(i)
+            close = _ansi_end(text, i)
+            word.append(ansi_c(text[i + 2:close]))
+            i = close + 1
+        elif c == '"' or (c == "$" and text[i + 1:i + 2] == '"'):
+            begin(i)
+            k = i + (1 if c == '"' else 2)
+            try:
+                while True:
+                    if k >= n:
+                        raise Unparsed("open double quote", "dquote", i + 1)
+                    d = text[k]
+                    if d == '"':
+                        k += 1
+                        break
+                    if d == "\\":
+                        nxt = text[k + 1:k + 2]
+                        if nxt == "\n":
+                            k += 2
+                        elif nxt in ("$", "`", '"', "\\"):
+                            word.append(nxt)
+                            k += 2
+                        else:
+                            word.append("\\")
+                            k += 1
+                    elif d == "`":
+                        close = _backtick_end(text, k)
+                        subst(k + 1, close)
+                        word.append(text[k:close + 1])
+                        state["expanded"] = True
+                        k = close + 1
+                    elif d == "$":
+                        end = dollar(k)
+                        if end is None:
+                            word.append("$")
+                            end = k + 1
+                        k = end
+                    else:
+                        word.append(d)
+                        k += 1
+            except Unparsed as inner:
+                if inner.kind == "dquote" and inner.start == i + 1:
+                    raise
+                raise Unparsed("open double quote", "dquote", i + 1, inner)
+            i = k
+        elif c == "#" and not state["started"]:
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+            marks.append(("comment", i, end))
+            i = end
+        elif c == "`":
+            begin(i)
+            close = _backtick_end(text, i)
+            subst(i + 1, close)
+            word.append(text[i:close + 1])
+            state["expanded"] = True
+            i = close + 1
+        elif c == "$":
+            begin(i)
+            end = dollar(i)
+            if end is None:
+                word.append("$")
+                end = i + 1
+            i = end
+        elif c == "(" and not state["started"] and _arith_end(text, i):
+            arith = _arith_end(text, i)
+            begin(i)
+            for span in _inner_substs(text, i + 2, arith - 2):
+                subst(*span)
+            word.append(text[i:arith])
+            state["expanded"] = True
+            i = arith
+        elif c in ";&|<>()\n":
+            end_word(i)
+            op = next(o for o in OPERATORS if text.startswith(o, i))
+            if op in ("<<", "<<-"):
+                marks.append(("<<", i))
+            out.append(("op", op))
+            i += len(op)
+        else:
+            begin(i)
+            if c in "*?[{":
+                state["expanded"] = True
+            word.append(c)
+            i += 1
+    end_word(n)
+    return out
 
 
 def lex(text, marks=None):
@@ -254,3 +639,144 @@ def piped_commands(text):
                 argv.append(value)
         out.append((argv, redirects, None))
     return [(argv, redirects, end) for argv, redirects, end in out if argv or redirects]
+
+
+# Exact reading, for the secrets guard. A deny-list built on a lexer can be
+# fooled wherever the lexer reads text differently from bash, so these read it
+# the way bash does and say when they can't be sure (`sure` false): the guard
+# then refuses the text if it mentions what it guards.
+
+HEREDOC_PLACEHOLDER = "/dev/null"
+
+
+def heredoc_operators(text):
+    """Offsets of the `<<` and `<<-` operators bash sees in text: none inside
+    quotes, comments or arithmetic, and those inside a command substitution
+    still open at the end of text (a heredoc in `"$(cat <<'EOF'`)."""
+    marks = []
+    try:
+        lex_exact(text, marks)
+    except Unparsed as error:
+        deepest = None
+        while error is not None:
+            if error.kind == "subst":
+                deepest = error
+            error = error.inner
+        ops = [m[1] for m in marks if m[0] == "<<"]
+        if deepest is not None:
+            ops += [deepest.start + k for k in heredoc_operators(text[deepest.start:])]
+        return ops
+    return [m[1] for m in marks if m[0] == "<<"]
+
+
+def place_heredocs(text):
+    """(main, docs, sure). main is the text without heredoc bodies, each
+    `<<WORD` turned into `< /dev/null` so nothing reads it as a heredoc again;
+    docs is (header line, start, end, body) for each, start and end bounding the
+    operator and its word in the header. A body ends where bash ends it: at a
+    line equal to the word (after leading tabs for `<<-`). sure is false when a
+    body never ends, the word is one bash would expand, or a line could end the
+    body inside a command substitution (`EOF)`)."""
+    lines, kept, docs, sure, i = text.split("\n"), [], [], True, 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
+        if "<<" not in line:
+            kept.append(line)
+            continue
+        before = "\n".join(kept + [""])
+        ops = [k - len(before) for k in heredoc_operators(before + line) if k >= len(before)]
+        cuts = []
+        for op in ops:
+            strip = line.startswith("<<-", op)
+            word_start = op + (3 if strip else 2)
+            marks = []
+            try:
+                lex_exact(line[word_start:], marks)
+            except Unparsed:
+                pass
+            first = next((m for m in marks if m[0] in ("word", "comment")), None)
+            if first is None or first[0] != "word" or line[word_start:word_start + first[1]].strip(" \t"):
+                sure = False
+                continue
+            delimiter, end = first[3], word_start + first[2]
+            if isinstance(delimiter, Expanded) or not delimiter:
+                sure = False
+            body = []
+            while i < len(lines):
+                candidate = lines[i].lstrip("\t") if strip else lines[i]
+                if candidate == delimiter:
+                    break
+                if candidate.startswith(delimiter) and candidate[len(delimiter):].lstrip(" \t")[:1] in (")", "`"):
+                    sure = False
+                body.append(lines[i])
+                i += 1
+            else:
+                sure = False
+            i += 1
+            docs.append((line, op, end, "\n".join(body)))
+            cuts.append((op, end))
+        for op, end in reversed(cuts):
+            line = line[:op] + "< " + HEREDOC_PLACEHOLDER + line[end:]
+        kept.append(line)
+    return "\n".join(kept), docs, sure
+
+
+def _exact_chunks(text):
+    """(chunks, sure): the whole text lexed, or line by line when it doesn't lex."""
+    try:
+        return [lex_exact(text)], True
+    except Unparsed:
+        chunks = []
+        for line in text.split("\n"):
+            try:
+                chunks.append(lex_exact(line))
+            except Unparsed:
+                pass
+        return chunks, False
+
+
+def exact_commands(text):
+    """(commands, substs, sure), as `simple_commands` reads them but with `lex_exact`."""
+    chunks, sure = _exact_chunks(text)
+    commands, substs = [], []
+    for chunk in chunks:
+        current, redirect = [], False
+        for kind, value in chunk:
+            if kind == "subst":
+                substs.append(value)
+            elif kind == "op":
+                if set(value) & set("<>"):
+                    redirect = True
+                    continue
+                commands.append(current)
+                current, redirect = [], False
+            elif redirect:
+                redirect = False
+            else:
+                current.append(value)
+        commands.append(current)
+    return [argv for argv in commands if argv], substs, sure
+
+
+def exact_pipes(text):
+    """(stages, sure), as `piped_commands` reads them but with `lex_exact`."""
+    chunks, sure = _exact_chunks(text)
+    out = []
+    for chunk in chunks:
+        argv, redirects, pending = [], [], None
+        for kind, value in chunk:
+            if kind == "subst":
+                continue
+            if kind == "op" and set(value) & set("<>"):
+                pending = value
+            elif kind == "op":
+                out.append((argv, redirects, value))
+                argv, redirects, pending = [], [], None
+            elif pending:
+                redirects.append((pending, value))
+                pending = None
+            else:
+                argv.append(value)
+        out.append((argv, redirects, None))
+    return [(argv, redirects, end) for argv, redirects, end in out if argv or redirects], sure
