@@ -189,6 +189,19 @@ MADE_UP_DENIED = [
     "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets & wait",
     "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets; gcloud secrets versions list staging-a $FLAGS",
     "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets; gcloud secrets versions list staging-*",
+    # the lexer reading text differently from bash (round 2, M8, M9)
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=\"\\-\" --project=waxseal-infra-secrets",
+    "bash -lc \"openssl rand -hex 24 | tr -d '\\\\n' | gcloud secrets versions add staging-a --data-file='\\-' --project=waxseal-infra-secrets\"",
+    "gcloud secrets versions list x\r#; export CLOUDSDK_CORE_LOG_HTTP=true\nopenssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "bash -c \"gcloud secrets versions list staging-a\\\n#; export CLOUDSDK_CORE_LOG_HTTP=true\nopenssl rand -hex 24 | tr -d '\\\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets\"",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets # tee",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets\r",
+    # the wrapper and the openssl side (round 2, m10)
+    "bash -c 'openssl rand -hex 24 | tr -d '\"'\"'\\n'\"'\"' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets'; gcloud secrets versions access latest --secret=x",
+    "bash -lc 'openssl rand -hex 24 | tr -d '\\''\\n'\\'' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets'",
+    "openssl rand -out 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 -out /tmp/v | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "openssl  rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
     # reading, creating, deleting
     "gcloud secrets versions access 2 --secret staging-a --project=waxseal-infra-secrets",
     "gcloud secrets create staging-a --project=waxseal-infra-secrets --replication-policy=automatic",
@@ -236,6 +249,18 @@ class Guard(unittest.TestCase):
                 out = run(command)
                 self.assertIsNotNone(out)
                 self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_made_up_value_in_codex_list_form(self):
+        script = ("openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a "
+                  "--data-file=- --project=waxseal-infra-secrets")
+        for command, allowed in ((["bash", "-lc", script], True),
+                                 (["bash", "-lc", script + "; gcloud secrets versions access 1 --secret=x"], False),
+                                 (["bash", "-lc", script.replace("--data-file=-", "--data-file=\\-")], False)):
+            raw = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                              "tool_input": {"command": command}, "cwd": OUTSIDE})
+            with self.subTest(command=command):
+                out = run(None, raw=raw)
+                self.assertEqual(out is None, allowed, out)
 
     def test_allowed(self):
         for command in ALLOWED:

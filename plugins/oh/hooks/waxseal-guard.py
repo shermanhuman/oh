@@ -13,10 +13,11 @@ a shell would execute, never at code or prose. It refuses:
   owner's decision D-3462, 2026-11-26). Exactly
   `openssl rand -hex|-base64 <n of 16 or more> | tr -d '\n' | gcloud secrets
   versions add staging-<entry> --data-file=- --project=waxseal-infra-secrets`,
-  and the whole command must be such pipes and `versions list` calls and
-  nothing else (optionally inside a bare `bash -c`): no other statement,
-  function, alias, assignment, redirect, subshell, substitution, variable or
-  glob, any of which could change what the pipe does (oh#58 round 1);
+  and the whole command's raw text must be such pipes and `staging-` version
+  listings in exactly that spelling, joined by `;`, `&&` or newlines, bare or
+  as the one argument of `bash -c`/`-lc` (shlex.join's spelling, or plain
+  double quotes). The text is matched, never lexed: any other character,
+  quote, backslash, CR or comment refuses (oh#58 rounds 1 and 2);
 - a Secret Manager URL handed to curl/wget/http/xh, directly or through a
   variable set in the same command.
 
@@ -36,6 +37,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import sys
 
 
@@ -69,7 +71,6 @@ GCLOUD_SWITCHES = {"-q", "--quiet", "-h", "--help", "--log-http", "--no-user-out
 GCLOUD_READS = (["list"], ["describe"], ["get-iam-policy"], ["versions", "list"], ["versions", "describe"], ["locations"])
 # The one write (D-3462): a made-up value for a staging entry, in this project.
 MADE_UP_PROJECT = "waxseal-infra-secrets"
-MADE_UP_ENTRY = re.compile(r"staging-[A-Za-z0-9_-]+")
 MADE_UP_MIN_BYTES = 16
 DEPTH = 4
 
@@ -93,80 +94,56 @@ def gcloud_words(args):
     return words
 
 
-def made_up_add(argv):
-    """gcloud secrets versions add staging-<entry> --data-file=- --project=<ours>, nothing else."""
-    if argv[:4] != ["gcloud", "secrets", "versions", "add"]:
-        return False
-    entry, data, project, rest, i = None, None, None, argv[4:], 0
-    while i < len(rest):
-        arg = rest[i]
-        name, eq, value = arg.partition("=")
-        if name in ("--data-file", "--project"):
-            if not eq:
-                if i + 1 >= len(rest):
-                    return False
-                value, i = rest[i + 1], i + 1
-            if name == "--data-file" and data is None:
-                data = value
-            elif name == "--project" and project is None:
-                project = value
-            else:
-                return False
-        elif not arg.startswith("-") and entry is None:
-            entry = arg
-        else:
-            return False
-        i += 1
-    return bool(entry and MADE_UP_ENTRY.fullmatch(entry)) and data == "-" and project == MADE_UP_PROJECT
+# D-3462's made-up staging value, matched on the raw text, never lexed: the
+# lexer was written to find dangerous commands, and every place it reads text
+# differently from bash (backslashes in double quotes, CR, `\` + newline) would
+# be a way past an allowance built on it (oh#58 rounds 1 and 2).
+_FLAGS = "(?:--data-file[= ]- --project[= ]{p}|--project[= ]{p} --data-file[= ]-)".format(p=MADE_UP_PROJECT)
+_PIPE = (r"openssl rand -(?:hex|base64) (?P<n>[0-9]{1,4}) \| tr -d '\\n' \| "
+         r"gcloud secrets versions add staging-[A-Za-z0-9_-]+ " + _FLAGS)
+_LIST = (r"gcloud secrets versions list staging-[A-Za-z0-9_-]+"
+         r"(?: --project[= ]" + MADE_UP_PROJECT + r")?(?: --format='value\(name,state\)')?")
+_STATEMENT = "(?:" + _PIPE.replace("(?P<n>", "(?:") + "|" + _LIST + ")"
+MADE_UP_TEXT = re.compile(_STATEMENT + "(?:(?: ?; ?| ?&& ?|\n)" + _STATEMENT + ")*\n?")
+MADE_UP_PIPE = re.compile(_PIPE)
 
 
-def made_up_statement(stages):
-    """`openssl rand -hex|-base64 <n> | tr -d '\\n' | gcloud ... add ...`, or `gcloud secrets versions list ...`."""
-    if len(stages) == 1:
-        return stages[0][:4] == ["gcloud", "secrets", "versions", "list"]
-    if len(stages) != 3 or stages[1] != ["tr", "-d", "\\n"] or not made_up_add(stages[2]):
+def made_up_script(text):
+    """The exact text: pipes and listings joined by `;`, `&&` or newlines, at least
+    one pipe, each of at least MADE_UP_MIN_BYTES random bytes."""
+    if not MADE_UP_TEXT.fullmatch(text):
         return False
-    rand = stages[0]
-    return (len(rand) == 4 and rand[:2] == ["openssl", "rand"] and rand[2] in ("-hex", "-base64")
-            and rand[3].isdigit() and int(rand[3]) >= MADE_UP_MIN_BYTES)
+    sizes = [int(m.group("n")) for m in MADE_UP_PIPE.finditer(text)]
+    return bool(sizes) and all(n >= MADE_UP_MIN_BYTES for n in sizes)
 
 
-def made_up_text(text, depth=0):
-    """True only when the whole text is D-3462's made-up staging value, with
-    nothing beside it: one or more exact pipes or version listings, joined by
-    `;`, `&&` or newlines, optionally as the one argument of a bare `bash -c`.
-    No other statement, function, alias, assignment, redirect, subshell,
-    process or command substitution, variable or glob can sit next to it and
-    change what the pipe does."""
-    if depth > 1 or not text or len(text) > MAX_TEXT:
+def made_up_text(text):
+    """True only for D-3462's exact text, bare or as the one argument of
+    `bash -c`/`-lc` spelled exactly as shlex.join (Codex's list form) or
+    with plain double quotes."""
+    if not isinstance(text, str) or len(text) > 4096:
         return False
-    try:
-        tokens = shell.lex(text)
-    except Exception:
-        return False
-    words = [v for kind, v in tokens if kind == "word"]
-    if len(tokens) == 3 and len(words) == 3 and words[0] in ("bash", "sh") and words[1] in ("-c", "-lc"):
-        return made_up_text(words[2], depth + 1)
-    statements, stages, argv = [], [], []
-    for kind, value in tokens + [("op", ";")]:
-        if kind == "word":
-            if ASSIGNMENT.match(value) or re.search(r"[$`*?\[\]{}~]", value):
-                return False
-            argv.append(value)
-        elif kind == "op" and value in ("|", ";", "\n", "&&"):
-            if not argv:
-                if value == "|" or stages:
-                    return False
+    if made_up_script(text):
+        return True
+    for shell_name in ("bash", "sh"):
+        for flag in ("-c", "-lc"):
+            prefix = f"{shell_name} {flag} "
+            if not text.startswith(prefix):
                 continue
-            stages.append(argv)
-            argv = []
-            if value != "|":
-                statements.append(stages)
-                stages = []
-        else:
-            return False
-    adds = [s for s in statements if len(s) == 3]
-    return bool(adds) and all(made_up_statement(s) for s in statements)
+            rest = text[len(prefix):]
+            if len(rest) > 2 and rest[0] == '"' and rest[-1] == '"':
+                # Inside double quotes bash turns `\\n` into `\n` and keeps `\n`;
+                # the pattern allows no other backslash, quote or `$`.
+                inner = rest[1:-1]
+                if made_up_script(inner) or made_up_script(inner.replace("'\\\\n'", "'\\n'")):
+                    return True
+            try:
+                parts = shlex.split(text)
+            except ValueError:
+                return False
+            if len(parts) == 3 and shlex.join(parts) == text and made_up_script(parts[2]):
+                return True
+    return False
 
 
 def argv_reason(argv, cwd, depth):
