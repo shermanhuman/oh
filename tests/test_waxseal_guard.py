@@ -117,6 +117,54 @@ ALLOWED = [
     "node -e 'console.log(1 << 3)'",
 ]
 
+# D-3462 (the owner, 2026-11-26): a made-up staging value, generated in the
+# pipe that stores it, and version metadata. Exactly these shapes.
+MADE_UP_ALLOWED = [
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-breakdown-sales-secrets-instantly_api_key --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -base64 32 | tr -d '\\n' | gcloud secrets versions add staging-a --project waxseal-infra-secrets --data-file -",
+    "openssl rand -hex 24 | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets; "
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-b --data-file=- --project=waxseal-infra-secrets",
+    "gcloud secrets versions list staging-a --project waxseal-infra-secrets --format='value(name,state)'",
+]
+
+# Near misses: each breaks one condition of the shape above.
+MADE_UP_DENIED = [
+    # a production entry
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add default-breakdown-admin-secrets-x --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 | gcloud secrets versions add breakdown-sales-secrets-instantly_api_key --data-file=- --project=waxseal-infra-secrets",
+    # the project left out, or another project
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=-",
+    "openssl rand -hex 24 | gcloud secrets versions add staging-a --data-file=- --project=other",
+    "openssl rand -hex 24 | gcloud --project=waxseal-infra-secrets secrets versions add staging-a --data-file=-",
+    # anything that could keep or show the value
+    "openssl rand -hex 24 | tee /tmp/v | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 | tee /dev/stderr | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -out v -hex 24 | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 > v; gcloud secrets versions add staging-a --data-file=v --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 2>&1 | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets > out",
+    # a value that isn't made up
+    "echo hunter2 | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "printf %s \"$KEY\" | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "cat key.txt | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "gcloud secrets versions add staging-a --data-file=key.txt --project=waxseal-infra-secrets",
+    "gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets < key.txt",
+    "openssl rand -hex 24 | sed s/a/b/ | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    # an entry name that isn't literal, or a second entry
+    "for e in staging-a staging-b; do openssl rand -hex 24 | gcloud secrets versions add $e --data-file=- --project=waxseal-infra-secrets; done",
+    "openssl rand -hex 24 | gcloud secrets versions add staging-$(cat name) --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 | gcloud secrets versions add staging-a$(cat name) --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 | gcloud secrets versions add staging-a`cat name` --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 | gcloud secrets versions add staging-a staging-b --data-file=- --project=waxseal-infra-secrets",
+    # a safe pipe next to an unsafe add
+    "openssl rand -hex 24 | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets; gcloud secrets versions add staging-a --data-file=k --project=waxseal-infra-secrets",
+    # reading, creating, deleting
+    "gcloud secrets versions access 2 --secret staging-a --project=waxseal-infra-secrets",
+    "gcloud secrets create staging-a --project=waxseal-infra-secrets --replication-policy=automatic",
+    "gcloud secrets delete staging-a --project=waxseal-infra-secrets --quiet",
+    "gcloud secrets versions destroy 1 --secret staging-a --project=waxseal-infra-secrets",
+]
+
 # Outside the guard's scope by design (the always-on rule still forbids them):
 # interpreter code, and text inside double quotes.
 NOT_COVERED = [
@@ -145,7 +193,18 @@ class Guard(unittest.TestCase):
                 out = run(command)
                 self.assertIsNotNone(out)
                 self.assertEqual(out["permissionDecision"], "deny")
-                self.assertIn("waxseal", out["permissionDecisionReason"])
+                self.assertIn(".claude/rules/secrets.md", out["permissionDecisionReason"])
+                self.assertNotIn("waxseal key", out["permissionDecisionReason"])
+
+    def test_made_up_staging_values(self):
+        for command in MADE_UP_ALLOWED:
+            with self.subTest(allowed=command):
+                self.assertIsNone(run(command))
+        for command in MADE_UP_DENIED:
+            with self.subTest(denied=command):
+                out = run(command)
+                self.assertIsNotNone(out)
+                self.assertEqual(out["permissionDecision"], "deny")
 
     def test_allowed(self):
         for command in ALLOWED:

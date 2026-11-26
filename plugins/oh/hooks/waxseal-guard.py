@@ -1,4 +1,4 @@
-"""PreToolUse guard: sealed secrets go through the waxseal CLI only.
+"""PreToolUse guard: agents don't read or write Secret Manager values.
 
 A backstop for oh's always-on rule, deliberately narrow: it looks only at what
 a shell would execute, never at code or prose. It refuses:
@@ -8,7 +8,13 @@ a shell would execute, never at code or prose. It refuses:
   heredoc fed to a shell, a shell script about to run, or named as the program
   in `kubectl exec`/`docker run`/`go run`;
 - any `gcloud secrets` verb other than list, describe, get-iam-policy,
-  versions list|describe and locations;
+  versions list|describe and locations, with one exception: a made-up staging
+  value, generated in the same pipe that stores it and never printed (the
+  owner's decision D-3462, 2026-11-26). Exactly
+  `openssl rand <-hex|-base64> <n> [| tr -d '\n'] | gcloud secrets versions add
+  staging-<entry> --data-file=- --project=waxseal-infra-secrets`: no other
+  stage, no redirect or tee, no command substitution, a literal entry name
+  starting `staging-`, and the project given;
 - a Secret Manager URL handed to curl/wget/http/xh, directly or through a
   variable set in the same command.
 
@@ -59,6 +65,10 @@ SECRET_API = re.compile(SECRET_HOST.pattern + r"/v\d\w*/projects/", re.I)
 KUBESEAL_ARG = re.compile(r"(^|/)kubeseal($|[:@])|sealed-secrets-kubeseal")
 GCLOUD_SWITCHES = {"-q", "--quiet", "-h", "--help", "--log-http", "--no-user-output-enabled", "--user-output-enabled"}
 GCLOUD_READS = (["list"], ["describe"], ["get-iam-policy"], ["versions", "list"], ["versions", "describe"], ["locations"])
+# The one write (D-3462): a made-up value for a staging entry, in this project.
+MADE_UP_PROJECT = "waxseal-infra-secrets"
+MADE_UP_ENTRY = re.compile(r"staging-[A-Za-z0-9_-]+")
+OPENSSL_RAND = re.compile(r"-hex|-base64|\d+")
 DEPTH = 4
 
 KUBESEAL = "runs kubeseal"
@@ -79,6 +89,63 @@ def gcloud_words(args):
                 words.append(arg)
             i += 1
     return words
+
+
+def is_versions_add(argv):
+    return bool(argv) and argv[0] == "gcloud" and gcloud_words(argv[1:])[:3] == ["secrets", "versions", "add"]
+
+
+def made_up_add(argv):
+    """gcloud secrets versions add staging-<entry> --data-file=- --project=<ours>, nothing else."""
+    if not argv or argv[0] != "gcloud" or argv[1:4] != ["secrets", "versions", "add"]:
+        return False
+    rest, entry, data, project, i = argv[4:], None, None, None, 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg.startswith("--data-file") or arg.startswith("--project"):
+            name, _, value = arg.partition("=")
+            if not _:
+                if i + 1 >= len(rest):
+                    return False
+                value, i = rest[i + 1], i + 1
+            if name == "--data-file" and data is None:
+                data = value
+            elif name == "--project" and project is None:
+                project = value
+            else:
+                return False
+        elif not arg.startswith("-") and entry is None:
+            entry = arg
+        else:
+            return False
+        i += 1
+    return bool(entry and MADE_UP_ENTRY.fullmatch(entry)) and data == "-" and project == MADE_UP_PROJECT
+
+
+def made_up_pipeline(stages):
+    """openssl rand [| tr -d '\n'] | gcloud ... add: no redirects, nothing else."""
+    if any(redirects for _, redirects, _ in stages):
+        return False
+    argvs = [argv for argv, _, _ in stages]
+    if not 2 <= len(argvs) <= 3 or not made_up_add(argvs[-1]):
+        return False
+    first = argvs[0]
+    if first[:2] != ["openssl", "rand"] or not first[2:] or not all(OPENSSL_RAND.fullmatch(a) for a in first[2:]):
+        return False
+    return len(argvs) == 2 or argvs[1] == ["tr", "-d", "\\n"]
+
+
+def pipelines(main):
+    """The text's pipelines, each a list of (argv, redirects, end) stages."""
+    out, current = [], []
+    for stage in shell.piped_commands(main):
+        current.append(stage)
+        if stage[2] != "|":
+            out.append(current)
+            current = []
+    if current:
+        out.append(current)
+    return out
 
 
 def argv_reason(argv, cwd, depth):
@@ -161,6 +228,10 @@ def reason_for(text, cwd, depth=0):
         if why:
             return why
     commands, substs = simple_commands(main)
+    # D-3462's made-up staging value. Allowed only when every `versions add` in
+    # this text is one, and the text has no command substitution to hide in.
+    adds = [p for p in pipelines(main) if any(is_versions_add(program(argv)) for argv, _, _ in p)]
+    made_up = bool(adds) and not substs and all(made_up_pipeline(p) for p in adds)
     for inner in substs:
         why = reason_for(inner, cwd, depth + 1)
         if why:
@@ -172,6 +243,8 @@ def reason_for(text, cwd, depth=0):
             if any(f"${n}" in arg or f"${{{n}}}" in arg for n in names for arg in argv[1:]):
                 return API
     for argv in commands:
+        if made_up and argv[:4] == ["gcloud", "secrets", "versions", "add"]:
+            continue
         why = argv_reason(argv, cwd, depth)
         if why:
             return why
@@ -204,12 +277,14 @@ def decide(event):
     if not why:
         return None
     return (
-        f"Blocked by oh: this command {why}. Sealed secrets go through the waxseal CLI only: "
-        "`waxseal key add|set|edit`, `waxseal reseal`, `waxseal secret list|show|retire`, "
-        "one visible command per call, values from --from-file, stdin, --generate, "
-        "or --from-key for a value waxseal already stores. "
-        "If waxseal can't do what you need, stop and ask the user; don't work around it. "
-        "If waxseal reports missing or expired Google credentials, ask the user to run `! gcloud auth application-default login`."
+        f"Blocked by oh: this command {why}. Secrets are External Secrets Operator `ExternalSecret`s "
+        "reading Google Secret Manager at pinned versions; agents change only those manifests, in PRs "
+        "(breakdown-infra's `.claude/rules/secrets.md`), and the user writes values in the Secret Manager console. "
+        "Agents may run `gcloud secrets versions list <entry>` (names and states, no values) and add a made-up "
+        "staging value, never printed (D-3462): `openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add "
+        f"staging-<entry> --data-file=- --project={MADE_UP_PROJECT}`, one literal entry per pipe. "
+        "For anything else, stop and ask the user; don't work around it. "
+        "If gcloud reports expired credentials, ask the user to run `! gcloud auth login`."
     )
 
 
