@@ -128,6 +128,11 @@ MADE_UP_ALLOWED = [
     "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets; "
     "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-b --data-file=- --project=waxseal-infra-secrets",
     "gcloud secrets versions list staging-a --project waxseal-infra-secrets --format='value(name,state)'",
+    # round 3, m12: each wrapper and spelling the guard accepts
+    "sh -c \"openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets\"",
+    "bash -lc \"openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets\"",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets\n",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets && gcloud secrets versions list staging-a",
 ]
 
 # Near misses: each breaks one condition of the shape above.
@@ -202,6 +207,19 @@ MADE_UP_DENIED = [
     "openssl rand -out 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
     "openssl rand -hex 24 -out /tmp/v | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
     "openssl  rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    # round 3: octal sizes (m11) and the edges no test held (m12)
+    "openssl rand -hex 0016 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -base64 017 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets || openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets & openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a.b --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a:b --data-file=- --project=waxseal-infra-secrets",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets; gcloud secrets versions list default-x",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets; gcloud secrets versions access latest --secret=staging-a",
+    "\\nopenssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "bash -lc 'openssl rand -hex 24 | tr -d '\"'\"'\\n'\"'\"' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets' x",
+    "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets ;  openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets",
+    "; ".join(["openssl rand -hex 24 | tr -d '\\n' | gcloud secrets versions add staging-a --data-file=- --project=waxseal-infra-secrets"] * 40),
     # reading, creating, deleting
     "gcloud secrets versions access 2 --secret staging-a --project=waxseal-infra-secrets",
     "gcloud secrets create staging-a --project=waxseal-infra-secrets --replication-policy=automatic",

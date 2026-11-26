@@ -15,7 +15,7 @@ a shell would execute, never at code or prose. It refuses:
   versions add staging-<entry> --data-file=- --project=waxseal-infra-secrets`,
   and the whole command's raw text must be such pipes and `staging-` version
   listings in exactly that spelling, joined by `;`, `&&` or newlines, bare or
-  as the one argument of `bash -c`/`-lc` (shlex.join's spelling, or plain
+  as the one argument of `bash`/`sh` `-c`/`-lc` (shlex.join's spelling, or plain
   double quotes). The text is matched, never lexed: any other character,
   quote, backslash, CR or comment refuses (oh#58 rounds 1 and 2);
 - a Secret Manager URL handed to curl/wget/http/xh, directly or through a
@@ -99,7 +99,7 @@ def gcloud_words(args):
 # differently from bash (backslashes in double quotes, CR, `\` + newline) would
 # be a way past an allowance built on it (oh#58 rounds 1 and 2).
 _FLAGS = "(?:--data-file[= ]- --project[= ]{p}|--project[= ]{p} --data-file[= ]-)".format(p=MADE_UP_PROJECT)
-_PIPE = (r"openssl rand -(?:hex|base64) (?P<n>[0-9]{1,4}) \| tr -d '\\n' \| "
+_PIPE = (r"openssl rand -(?:hex|base64) (?P<n>[1-9][0-9]{1,3}) \| tr -d '\\n' \| "
          r"gcloud secrets versions add staging-[A-Za-z0-9_-]+ " + _FLAGS)
 _LIST = (r"gcloud secrets versions list staging-[A-Za-z0-9_-]+"
          r"(?: --project[= ]" + MADE_UP_PROJECT + r")?(?: --format='value\(name,state\)')?")
