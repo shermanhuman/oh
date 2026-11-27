@@ -117,10 +117,18 @@ UNSURE = "mentions Secret Manager in a form the guard can't read for certain"
 NAMED = "names a Secret Manager value read or write"
 
 
+ANSI_STRING = re.compile(r"\$'((?:[^'\\]|\\.)*)'")
+PARAMETER_OPERATOR = re.compile(r"\$\{[#!]?[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?(?::?[-=+?]|##?|%%?|//?|/#|/%|\^\^?|,,?|:)?")
+# Words xargs, find and parallel replace before the command runs.
+PLACEHOLDER = re.compile(r"\{[^{}\s]*\}")
+
+
 def plain(text):
     """text with quoting taken out: escapes decoded (\\x73, \\163, \\u0073),
     then backslash-newlines, quotes and backslashes removed, so a word split by
     quotes or spelled in escapes (`secr''ets`, `$'\\x73ecrets'`) reads whole."""
+    text = ANSI_STRING.sub(lambda m: shell.ansi_c(m.group(1)), text).replace('$"', '"')
+    text = PARAMETER_OPERATOR.sub(" ", text)
     text = re.sub(r"\\x([0-9A-Fa-f]{1,2})|\\u([0-9A-Fa-f]{1,4})", lambda m: chr(int(m.group(1) or m.group(2), 16)), text)
     text = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8) & 0xFF), text)
     return re.sub(r"['\"\\]", "", text.replace("\\\n", ""))
@@ -241,7 +249,7 @@ def split_string(argv):
     """The string `env -S '…'` (or --split-string) splits into a command, if any,
     wherever env sits among the wrappers (`timeout 5 env -S …`, `env env -S …`)."""
     for i, word in enumerate(argv):
-        if word != "env":
+        if os.path.basename(word) != "env":
             continue
         k = i + 1
         while k < len(argv) and (argv[k].startswith("-") or ASSIGNMENT.match(argv[k])):
@@ -267,7 +275,34 @@ def unwrap(argv):
     return argv
 
 
+def placeholders(argv):
+    """argv with the words xargs, find or parallel will replace marked Expanded."""
+    names = [os.path.basename(w) for w in argv]
+    marks = set()
+    if "xargs" in names:
+        args = argv[names.index("xargs") + 1:]
+        for k, option in enumerate(args):
+            if option == "-I" and k + 1 < len(args):
+                marks.add(str(args[k + 1]))
+            elif option.startswith("-I") and len(option) > 2:
+                marks.add(option[2:])
+            elif option in ("-i", "--replace"):
+                marks.add("{}")
+            elif option.startswith(("-i", "--replace=")):
+                marks.add(option.split("=", 1)[1] if "=" in option else option[2:])
+            elif not option.startswith("-"):
+                break
+    general = "find" in names or "parallel" in names
+    out = []
+    for w in argv:
+        if not isinstance(w, Expanded) and ((general and PLACEHOLDER.search(w)) or any(m and m in w for m in marks)):
+            w = Expanded(w)
+        out.append(w)
+    return out
+
+
 def argv_reason(argv, cwd, depth, mentioned, nested=True):
+    argv = placeholders(argv)
     string = split_string(argv)
     if string is not None:
         return reason_for(string, cwd, depth + 1, mentioned)
@@ -296,7 +331,7 @@ def script_reason(script, cwd, depth, mentioned):
     """A file a shell is told to run, whatever its name; one it can't read counts as unsure."""
     path, text = shell.read_script(script, cwd)
     if text is None:
-        return UNSURE if mentioned and not str(script).startswith("/dev/") else None
+        return UNSURE if mentioned and str(script) != "/dev/null" else None
     return reason_for(text, str(path.parent), depth + 1, mentioned)
 
 
@@ -315,6 +350,9 @@ def first_reason(argv, name, args, cwd, depth, mentioned):
         if string is not None:
             return reason_for(string, cwd, depth + 1, mentioned)
         if script is not None:
+            if os.path.basename(script) in NESTED and not isinstance(script, Expanded):
+                # `bash /path/to/gcloud secrets …` runs gcloud's wrapper with these arguments.
+                return argv_reason(args[args.index(script):], cwd, depth + 1, mentioned)
             return script_reason(script, cwd, depth, mentioned)
         return None
     if name in ("source", ".") and args:

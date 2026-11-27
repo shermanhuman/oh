@@ -101,7 +101,8 @@ def ansi_c(body):
         elif e in "xuU":
             width = {"x": 2, "u": 4, "U": 8}[e]
             digits = re.match(r"[0-9A-Fa-f]{0,%d}" % width, body[i + 2:]).group()
-            out.append(chr(int(digits, 16)) if digits else "\\" + e)
+            value = int(digits, 16) if digits else None
+            out.append(chr(value) if value is not None and value <= 0x10FFFF else "\\" + e + digits)
             i += 2 + len(digits)
         elif e == "c" and i + 2 < n:
             out.append(chr(ord(body[i + 2]) & 0x1F))
@@ -209,9 +210,7 @@ def _param_end(text, i):
     try:
         while k < n:
             c = text[k]
-            if c == "{":
-                depth, k = depth + 1, k + 1
-            elif c == "}":
+            if c == "}":
                 depth -= 1
                 if not depth:
                     return k
@@ -441,6 +440,14 @@ def lex_exact(text, marks=None):
             word.append(text[i:arith])
             state["expanded"] = True
             i = arith
+        elif c in "<>" and text[i + 1:i + 2] == "(":
+            # Process substitution: a word (a file name) whose content runs.
+            begin(i)
+            close = _subst_end(text, i + 2)
+            subst(i + 2, close)
+            word.append(text[i:close + 1])
+            state["expanded"] = True
+            i = close + 1
         elif c in ";&|<>()\n":
             op = next(o for o in OPERATORS if text.startswith(o, i))
             if state["started"] and set(op) & set("<>") and re.fullmatch(r"\d+|\{[A-Za-z_][A-Za-z0-9_]*\}", text[state["start"]:i]):
@@ -702,6 +709,7 @@ def place_heredocs(text):
     could end the body inside a command substitution (`EOF)`)."""
     lines, kept, docs, sure, i = text.split("\n"), [], [], True, 0
     pending = []  # kept lines since the last point where nothing was left open
+    budget = 4 * MAX_TEXT  # characters re-lexed while something stays open; past it, give up placing
     while i < len(lines):
         line = lines[i]
         i += 1
@@ -710,6 +718,10 @@ def place_heredocs(text):
             pending.append(line)
             continue
         before = "\n".join(pending + [""])
+        budget -= len(before)
+        if budget < 0:
+            kept.extend(lines[i - 1:])
+            return "\n".join(kept), docs, False
         found, clean = heredoc_operators(before + line)
         ops = [k - len(before) for k in found if k >= len(before)]
         cuts = []

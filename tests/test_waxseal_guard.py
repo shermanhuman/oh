@@ -113,6 +113,20 @@ HOLES = [
     ("unknown switch before the group", f"gcloud --foo {ACCESS}", True),
     ("pipe+redirect before a variable program", f"g=gcloud; true |</dev/null $g {ACCESS}", True),
     ("case branch", f"case x in a|x) gcloud {ACCESS};; esac", True),
+    ("/usr/bin/env -S", f"/usr/bin/env -S 'gcloud {ACCESS}'", True),
+    ("bash a process substitution", f"bash <(echo 'gcloud {ACCESS}')", True),
+    ("source a process substitution", f"source <(echo 'gcloud {ACCESS}')", True),
+    ("bash run on gcloud's own path", f"bash {{BIN}}/gcloud {ACCESS}", True),
+    ("parameter default spells the group", "gcloud ${x:-secrets} versions destroy 3 --secret=x", True),
+    ("xargs replace string", "xargs -I{} gcloud {} versions destroy 3 --secret=x <<< secrets", True),
+    ("xargs -I% from a pipe", "echo secrets | xargs -I% gcloud % versions destroy 3 --secret=x", True),
+    ("find start path as the group", "mkdir -p secrets; find secrets -maxdepth 0 -exec gcloud {} versions destroy 3 --secret=x \\;", True),
+    ("parallel placeholder", "parallel gcloud {} versions destroy 3 --secret=x ::: secrets", False),
+    ("\\U out of range, then $'' in the group", ": $'\\UFFFFFFFF'; gcloud sec$'r'ets versions destroy 3 --secret=x", True),
+    ("case inside $(…), then $'' in the group", "x=$(case a in a) echo;; esac); g=gcloud; $g sec$'r'ets versions destroy 3 --secret=x", True),
+    ("{ inside ${…}", ": ${x/{/}; g=gcloud; $g sec$'r'ets versions destroy 3 --secret=x", True),
+    ("\\U escape spells the group", "g=gcloud; $g $'\\U00000073'ecrets versions destroy 3 --secret=x", True),
+    ("source /dev/stdin", f"source /dev/stdin <<< 'gcloud {ACCESS}'", True),
     ("trap string", "s=secrets; trap \"gcloud $s versions destroy 3 --secret=x\" EXIT", True),
 ]
 
@@ -271,7 +285,7 @@ class Guard(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("bash"), "needs bash")
     def test_holes_are_real(self):
-        """Each hole, run in bash with a stand-in gcloud, really reaches `gcloud secrets versions access`."""
+        """Each hole, run in bash with a stand-in gcloud, really reaches a refused `gcloud secrets` verb."""
         with tempfile.TemporaryDirectory() as d:
             root = pathlib.Path(d)
             stubs, log, work = root / "bin", root / "log", root / "work"
@@ -346,6 +360,7 @@ class Guard(unittest.TestCase):
             "gcloud " + " ".join(f"--f{i} v{i}" for i in range(40)) + " secrets versions destroy 3 --secret x",
             "\n".join(f"cat <<'EOF{i}'\nbody\nEOF{i}" for i in range(5000)) + "\ngcloud secrets versions destroy 3 --secret=x",
             "echo " + '"$(echo ' * 2000 + "x" + ')"' * 2000 + "; gcloud secrets list",
+            "x='\n" + "<<\n" * 60000 + "'\ng=gcloud; $g sec$'r'ets versions destroy 3 --secret=x",
         ]
         for command in commands:
             with self.subTest(command=command[:40]):
