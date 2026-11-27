@@ -634,13 +634,17 @@ def heredoc_reason(header, start, end, body, cwd, depth, mentioned):
                 write(target, body, cwd)
     if name in ("cat", "tee"):
         if name == "tee":
-            written = next((a for a in argv[1:] if not a.startswith("-")), "")
+            targets = [a for a in argv[1:] if not a.startswith("-")][:1]
         else:
-            target = exact_pipes(innermost(header[:start]) + " " + header[end:])[0]
-            written = next((t for _, redirects, _ in target for op, t in redirects if ">" in op), "")
-        if written:
+            # Every file a `>` on the heredoc's line sends output to (`| sort > run.sh`, `{ cat <<EOF; } > run.sh`),
+            # not an earlier line's: the header now starts where nothing was left open.
+            stages = exact_pipes(before)[0]
+            lines = [k for k, (_, _, end) in enumerate(stages) if end == "\n"]
+            stages = stages[lines[-1] + 1:] if lines else stages
+            targets = [t for _, redirects, _ in stages + exact_pipes(after)[0] for op, t in redirects if ">" in op]
+        for written in targets:
             write(written, body, cwd)
-        if pathlib.Path(str(written)).suffix in SHELL_SUFFIXES:
+        if any(pathlib.Path(str(t)).suffix in SHELL_SUFFIXES for t in targets):
             return reason_for(body, cwd, depth + 1, mentioned)
     return None
 

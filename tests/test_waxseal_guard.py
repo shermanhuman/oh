@@ -525,6 +525,23 @@ class Guard(unittest.TestCase):
                 with self.subTest(command=command):
                     self.assertIsNone(run(command, cwd=d))
 
+    def test_heredoc_target_is_its_own_commands(self):
+        """Round 12's M55: the file a `cat` heredoc is written to is the one on its own command, not an earlier
+        line's or command's `2>/dev/null` or `> log.txt`."""
+        with tempfile.TemporaryDirectory() as d:
+            for command in [f"mkdir -p s 2>/dev/null\ncat > s/r.sh <<'EOF'\n{V11}\nEOF\nbash s/r.sh",
+                            f"echo starting > log.txt\ncat <<'EOF' > run.sh\n{V11}\nEOF\nchmod +x run.sh && ./run.sh",
+                            f"mkdir -p s 2>/dev/null; cat > s/r.sh <<'EOF'\n{V11}\nEOF\nbash s/r.sh",
+                            f"cat <<'A' > a.txt; cat <<'B' > b.sh\nnotes\nA\n{V11}\nB\nbash b.sh",
+                            f"echo start > log.txt\ncat <<'EOF' | sort > r.sh\n{V11}\nEOF\nbash r.sh",
+                            f"echo start > log.txt\n{{ cat <<'EOF'; }} > r.sh\n{V11}\nEOF\nbash r.sh"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
+            for command in [f"echo make > build.sh\ncat <<'EOF'\nTo read it yourself: {V11}\nEOF",
+                            f"cat <<'EOF' > notes.md 2>/dev/null\n{V11}\nEOF"]:
+                with self.subTest(command=command):
+                    self.assertIsNone(run(command, cwd=d))
+
     def test_dash_reads_stdin(self):
         """Round 10's M48: `bash -` and `sh -` read commands from stdin, like `bash -s`; `bash - x.sh` runs x.sh."""
         v = "gcloud secrets versions access latest --secret=x"
