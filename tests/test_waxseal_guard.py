@@ -64,7 +64,8 @@ DENIED = [
 # Ways past the guard that bash really runs (oh#59 and its comments, plus the
 # same classes found while fixing them): (label, command, whether the bash
 # oracle below can run it). `{BIN}` is the directory holding gcloud.
-ACCESS = "secrets versions access latest --secret=x"
+# A refused verb the backstop (NAMED_DENIED) doesn't name, so these test the reading itself.
+ACCESS = "secrets versions destroy 3 --secret=x"
 HOLES = [
     ("1 pipe+redirect <", f"true |</dev/null gcloud {ACCESS}", True),
     ("1 amp+redirect <", f"true &</dev/null gcloud {ACCESS}", True),
@@ -97,7 +98,22 @@ HOLES = [
     ("d8 subst program", f"$(echo gcloud) {ACCESS}", True),
     ("d8 backtick program", f"`echo gcloud` {ACCESS}", True),
     ("d8 dq substitution", f"echo \"$(gcloud {ACCESS})\"", True),
-    ("d8 variable group word", f"s=secrets; gcloud $s versions access latest --secret=x", True),
+    ("d8 variable group word", "s=secrets; gcloud $s versions destroy 3 --secret=x", True),
+    ("fd-number redirect", f"2>/dev/null gcloud {ACCESS}", True),
+    ("{fd} redirect", f"{{fd}}>/dev/null gcloud {ACCESS}", True),
+    ("fd-number before a variable program", f"g=gcloud; 2>/dev/null $g {ACCESS}", True),
+    ("quotes split the word", "g=gcloud; $g secret\"s\" versions destroy 3 --secret=x", True),
+    ("unquoted heredoc body runs substitutions", f"cat <<EOF > notes.md\n$(gcloud {ACCESS})\nEOF", True),
+    ("delimiter E\"OF\"", f"cat <<E\"OF\"\nb\nEOF\ngcloud {ACCESS}\nE", True),
+    ("delimiter E\\OF", f"cat <<E\\OF\nb\nEOF\ngcloud {ACCESS}\nE", True),
+    ("backslash-newline inside double quotes", f"\"gcl\\\noud\" {ACCESS}", True),
+    ("ansi-c decoded program", f"$'\\x67cloud' {ACCESS}", True),
+    ("heredoc ended by EOF)", f"x=$(cat <<EOF\nhi\nEOF)\ngcloud {ACCESS}\nEOF", True),
+    ("bash --rcfile", f"bash --rcfile /dev/null -c 'gcloud {ACCESS}'", True),
+    ("unknown switch before the group", f"gcloud --foo {ACCESS}", True),
+    ("pipe+redirect before a variable program", f"g=gcloud; true |</dev/null $g {ACCESS}", True),
+    ("case branch", f"case x in a|x) gcloud {ACCESS};; esac", True),
+    ("trap string", "s=secrets; trap \"gcloud $s versions destroy 3 --secret=x\" EXIT", True),
 ]
 
 # Refused only because they mention Secret Manager in text the guard can't read for certain.
@@ -105,6 +121,17 @@ UNSURE_DENIED = [
     "echo \"unclosed; gcloud secrets list",
     "$CMD --version; gcloud secrets list",
     "bash <<< 'gcloud secrets list'",
+    "cat <<EOF\ngcloud secrets list",
+]
+
+# Refused because the text the shell runs names a value read or write, however the rest reads.
+NAMED_DENIED = [
+    "rg 'secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:access' docs/",
+    "python3 -c \"import subprocess; subprocess.run(['gcloud','secrets','versions','access','latest'])\"",
+    "trap 'gcloud secrets versions access latest --secret=x' EXIT",
+    "mapfile -C 'gcloud secrets versions access latest --secret=x #' -c 1 < /etc/hostname",
+    "gh pr comment 5 --body 'refuses gcloud secrets versions access now'",
+    "H=secret; curl https://${H}manager.googleapis.com/v1/projects/p/secrets/s/versions/1:access",
 ]
 
 # Everyday commands that only mention these tools, or read metadata.
@@ -143,7 +170,6 @@ ALLOWED = [
     "DOCS=https://secretmanager.googleapis.com/; curl -s https://example.com/health",
     "grep -rn kubeseal docs/",
     "grep -rn access_secret_version plugins/ tests/",
-    "rg 'secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:access' docs/",
     "git log --all --oneline --grep=kubeseal",
     "sed -i '' 's/kubeseal/waxseal/g' README.md",
     "echo 'kubeseal is not used here'",
@@ -176,13 +202,24 @@ ALLOWED = [
     "echo \"it's fine; gcloud is only mentioned",
     "find . -name '*.yaml' -exec grep -l secrets {} +",
     "which gcloud && gcloud secrets list",
+    "S=~/.local/share/sugarhouse/bin/sugar; $S decide --question \"may agents run gcloud secrets versions list?\" --verdict accepted",
+    "H=~/.local/bin/hc; $H send t2d \"the secrets guard PR is ready\"",
+    "git commit -m \"$(cat <<'EOF'\nguard: it's fine :) and (secrets) stay put\nEOF\n)\"",
+    "cat <<EOF > notes.md\nsecrets are listed with $(date)\nEOF",
+    "echo $'it\\'s' && gcloud secrets list",
+    "true |& tee log; gcloud secrets list",
+    "echo ok 2>&1 | grep -c secrets",
+    "gcloud secrets versions --no-quiet list foo",
+    "declare -A ROW; ROW[secrets]=\"listed\"; [ -z \"$x\" ] && echo secrets",
+    "kubectl get secret default-twenty-secrets -o name; D=~/x/secrets; ls $D",
+    "cat > check.sh <<'EOF'\n# never prints secrets\n$CHECK --all\nEOF",
+    "case $n in breakdown-*) echo web;; *) echo other;; esac; gcloud secrets list",
 ]
 
 # Outside the guard's scope by design (the rule still forbids them): interpreter code.
 NOT_COVERED = [
     "python3 - <<'PY'\nfrom google.cloud import secretmanager\nc.access_secret_version(name=n)\nPY",
     "node - <<'EOF'\nconst [v] = await client.accessSecretVersion({name});\nEOF",
-    "python3 -c \"import subprocess; subprocess.run(['gcloud','secrets','versions','access','latest'])\"",
 ]
 
 
@@ -216,6 +253,14 @@ class Guard(unittest.TestCase):
                 self.assertIsNotNone(out)
                 self.assertEqual(out["permissionDecision"], "deny")
 
+    def test_named_denied(self):
+        for command in NAMED_DENIED:
+            with self.subTest(command=command):
+                out = run(command)
+                self.assertIsNotNone(out)
+                self.assertIn("names a Secret Manager value read or write", out["permissionDecisionReason"])
+                self.assertIn("quoted heredoc", out["permissionDecisionReason"])
+
     def test_unsure_denied(self):
         for command in UNSURE_DENIED:
             with self.subTest(command=command):
@@ -246,7 +291,7 @@ class Guard(unittest.TestCase):
                         ["env", "-i", f"PATH={stubs}:/usr/bin:/bin", "bash", str(script)],
                         cwd=work, capture_output=True, stdin=subprocess.DEVNULL, timeout=20,
                     )
-                    self.assertIn("secrets versions access", log.read_text())
+                    self.assertRegex(log.read_text(), r"(?m)^(--\S+ )*secrets versions destroy")
 
     def test_allowed(self):
         for command in ALLOWED:
@@ -273,6 +318,13 @@ class Guard(unittest.TestCase):
             for command in ["bash seal.sh", "sh ./seal.sh", "./seal.sh", "./seal"]:
                 with self.subTest(command=command):
                     self.assertIsNotNone(run(command, cwd=d))
+            (root / "plain").write_text("gcloud secrets versions destroy 3 --secret=x\n")
+            for command in ["bash plain", "source plain", ". ./plain", "sh -e plain"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
+            # A script that can't be read, in a command that mentions Secret Manager, is refused.
+            self.assertIsNotNone(run("bash missing.sh; gcloud secrets list", cwd=d))
+            self.assertIsNone(run("bash missing.sh", cwd=d))
             for command in ["bash ok.sh", "bash comment.sh", "python3 read.py", "cat seal.sh"]:
                 with self.subTest(command=command):
                     self.assertIsNone(run(command, cwd=d))
@@ -287,6 +339,20 @@ class Guard(unittest.TestCase):
             start = time.monotonic()
             self.assertIsNone(run(command))
             self.assertLess(time.monotonic() - start, 5)
+
+    def test_fast_on_hostile_input(self):
+        """Slow paths must finish well inside the hook's 10 s, or refuse: a killed guard lets the command run."""
+        commands = [
+            "gcloud " + " ".join(f"--f{i} v{i}" for i in range(40)) + " secrets versions destroy 3 --secret x",
+            "\n".join(f"cat <<'EOF{i}'\nbody\nEOF{i}" for i in range(5000)) + "\ngcloud secrets versions destroy 3 --secret=x",
+            "echo " + '"$(echo ' * 2000 + "x" + ')"' * 2000 + "; gcloud secrets list",
+        ]
+        for command in commands:
+            with self.subTest(command=command[:40]):
+                start = time.monotonic()
+                out = run(command)
+                self.assertLess(time.monotonic() - start, 4)
+                self.assertIsNotNone(out)
 
     def test_bad_input_passes(self):
         self.assertIsNone(run(None, raw="not json"))
@@ -315,6 +381,10 @@ class Guard(unittest.TestCase):
             hooks.mkdir(parents=True)
             (hooks / "waxseal-guard.py").write_text("")
             self.assertIsNone(run("kubeseal --version", cwd=d))
+            # Anyone can make such a tree, so a plain Secret Manager command is still refused there.
+            self.assertIsNotNone(run("gcloud secrets versions destroy 3 --secret x", cwd=d))
+            self.assertIsNotNone(run("curl https://secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:access", cwd=d))
+            self.assertIsNone(run("grep -rn 'gcloud secrets versions access' tests/", cwd=d))
 
 
 if __name__ == "__main__":

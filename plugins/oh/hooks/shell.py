@@ -8,6 +8,7 @@ with the result; nothing here knows about any one rule.
 Loaded by path (see `load` in each guard), because `python3 -I` leaves the
 hook's own directory off sys.path.
 """
+import os
 import pathlib
 import re
 import shlex
@@ -187,11 +188,17 @@ def _subst_end(text, i):
             elif c == ")":
                 depth -= 1
                 if not depth:
+                    inner = text[i:k]
+                    # A `case` pattern's ) would close it early: bash reads past it, so this can't be placed.
+                    if len(re.findall(r"(?:^|[\s;&|(])case\s", inner)) > len(re.findall(r"\besac\b", inner)):
+                        raise Unparsed("case inside $(", "subst", i)
                     return k
                 k += 1
             else:
                 k = _skip_nested(text, k)
     except Unparsed as inner:
+        if inner.kind == "subst" and inner.start == i:
+            raise
         raise Unparsed("open $(", "subst", i, inner)
     raise Unparsed("open $(", "subst", i)
 
@@ -286,7 +293,7 @@ def lex_exact(text, marks=None):
     is an `Expanded`. With a list as `marks`, also appends ("word", start, end,
     value) and ("comment", start, end) as it goes, so they survive an Unparsed."""
     out, word, i, n = [], [], 0, len(text)
-    state = {"started": False, "expanded": False, "start": 0}
+    state = {"started": False, "expanded": False, "start": 0, "glob": []}
     marks = marks if marks is not None else []
 
     def begin(at):
@@ -296,14 +303,23 @@ def lex_exact(text, marks=None):
     def end_word(at):
         if state["started"]:
             value = "".join(word)
+            # Unquoted glob or brace characters expand only in a pattern: `*`, `?`, `[…]`, `{a,b}`, `{1..3}`.
+            if re.search(r"[*?]|\[.*\]|\{.*(,|\.\.).*\}", "".join(state["glob"])):
+                state["expanded"] = True
             value = Expanded(value) if state["expanded"] else value
             out.append(("word", value))
             marks.append(("word", state["start"], at, value))
         word.clear()
+        state["glob"].clear()
         state["started"] = state["expanded"] = False
 
     def subst(start, end):
         out.append(("subst", text[start:end]))
+        marks.append(("subst", start, end))
+
+    def backtick(start, end):
+        # Inside backquotes a backslash before $ ` or \ is removed before the text runs.
+        out.append(("subst", re.sub(r"\\([$`\\])", r"\1", text[start:end])))
         marks.append(("subst", start, end))
 
     def dollar(k):
@@ -380,7 +396,7 @@ def lex_exact(text, marks=None):
                             k += 1
                     elif d == "`":
                         close = _backtick_end(text, k)
-                        subst(k + 1, close)
+                        backtick(k + 1, close)
                         word.append(text[k:close + 1])
                         state["expanded"] = True
                         k = close + 1
@@ -406,7 +422,7 @@ def lex_exact(text, marks=None):
         elif c == "`":
             begin(i)
             close = _backtick_end(text, i)
-            subst(i + 1, close)
+            backtick(i + 1, close)
             word.append(text[i:close + 1])
             state["expanded"] = True
             i = close + 1
@@ -426,16 +442,19 @@ def lex_exact(text, marks=None):
             state["expanded"] = True
             i = arith
         elif c in ";&|<>()\n":
-            end_word(i)
             op = next(o for o in OPERATORS if text.startswith(o, i))
+            if state["started"] and set(op) & set("<>") and re.fullmatch(r"\d+|\{[A-Za-z_][A-Za-z0-9_]*\}", text[state["start"]:i]):
+                # `2>/dev/null` and `{fd}>&-`: the number or {name} belongs to the redirect.
+                word.clear()
+                state["started"] = state["expanded"] = False
+            end_word(i)
             if op in ("<<", "<<-"):
                 marks.append(("<<", i))
             out.append(("op", op))
             i += len(op)
         else:
             begin(i)
-            if c in "*?[{":
-                state["expanded"] = True
+            state["glob"].append(c)
             word.append(c)
             i += 1
     end_word(n)
@@ -646,13 +665,16 @@ def piped_commands(text):
 # the way bash does and say when they can't be sure (`sure` false): the guard
 # then refuses the text if it mentions what it guards.
 
-HEREDOC_PLACEHOLDER = "/dev/null"
+# What a heredoc operator and its word become in `main`: a redirect from a name
+# no command can spell, so `echo x < /dev/null | bash` isn't taken for a heredoc.
+HEREDOC_PLACEHOLDER = "/dev/null/oh-heredoc-" + os.urandom(8).hex()
 
 
 def heredoc_operators(text):
-    """Offsets of the `<<` and `<<-` operators bash sees in text: none inside
-    quotes, comments or arithmetic, and those inside a command substitution
-    still open at the end of text (a heredoc in `"$(cat <<'EOF'`)."""
+    """(offsets, clean): the `<<` and `<<-` operators bash sees in text, none
+    inside quotes, comments or arithmetic, and those inside a command
+    substitution still open at the end of text (a heredoc in `"$(cat <<'EOF'`);
+    clean is true when nothing is left open at the end."""
     marks = []
     try:
         lex_exact(text, marks)
@@ -664,28 +686,32 @@ def heredoc_operators(text):
             error = error.inner
         ops = [m[1] for m in marks if m[0] == "<<"]
         if deepest is not None:
-            ops += [deepest.start + k for k in heredoc_operators(text[deepest.start:])]
-        return ops
-    return [m[1] for m in marks if m[0] == "<<"]
+            ops += [deepest.start + k for k in heredoc_operators(text[deepest.start:])[0]]
+        return ops, False
+    return [m[1] for m in marks if m[0] == "<<"], True
 
 
 def place_heredocs(text):
     """(main, docs, sure). main is the text without heredoc bodies, each
     `<<WORD` turned into `< /dev/null` so nothing reads it as a heredoc again;
-    docs is (header line, start, end, body) for each, start and end bounding the
-    operator and its word in the header. A body ends where bash ends it: at a
-    line equal to the word (after leading tabs for `<<-`). sure is false when a
-    body never ends, the word is one bash would expand, or a line could end the
-    body inside a command substitution (`EOF)`)."""
+    docs is (header line, start, end, body, quoted) for each, start and end
+    bounding the operator and its word in the header, quoted true when the word
+    is quoted (bash then expands nothing in the body). A body ends where bash
+    ends it: at a line equal to the word (after leading tabs for `<<-`). sure is
+    false when a body never ends, the word is one bash would expand, or a line
+    could end the body inside a command substitution (`EOF)`)."""
     lines, kept, docs, sure, i = text.split("\n"), [], [], True, 0
+    pending = []  # kept lines since the last point where nothing was left open
     while i < len(lines):
         line = lines[i]
         i += 1
         if "<<" not in line:
             kept.append(line)
+            pending.append(line)
             continue
-        before = "\n".join(kept + [""])
-        ops = [k - len(before) for k in heredoc_operators(before + line) if k >= len(before)]
+        before = "\n".join(pending + [""])
+        found, clean = heredoc_operators(before + line)
+        ops = [k - len(before) for k in found if k >= len(before)]
         cuts = []
         for op in ops:
             strip = line.startswith("<<-", op)
@@ -700,6 +726,7 @@ def place_heredocs(text):
                 sure = False
                 continue
             delimiter, end = first[3], word_start + first[2]
+            quoted = any(q in line[word_start + first[1]:end] for q in "'\"\\")
             if isinstance(delimiter, Expanded) or not delimiter:
                 sure = False
             body = []
@@ -714,23 +741,73 @@ def place_heredocs(text):
             else:
                 sure = False
             i += 1
-            docs.append((line, op, end, "\n".join(body)))
+            docs.append((line, op, end, "\n".join(body), quoted))
             cuts.append((op, end))
         for op, end in reversed(cuts):
             line = line[:op] + "< " + HEREDOC_PLACEHOLDER + line[end:]
         kept.append(line)
+        pending = [] if clean else pending + [line]
     return "\n".join(kept), docs, sure
+
+
+def read_script(arg, cwd):
+    """(path, text) of a file a shell is about to run, whatever its name, or
+    (path, None) when it can't be read (missing, unreadable, too long)."""
+    path = pathlib.Path(arg)
+    if not path.is_absolute():
+        path = pathlib.Path(cwd) / path
+    try:
+        if not path.is_file() or path.stat().st_size > MAX_TEXT:
+            return path, None
+        return path, path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return path, None
+
+
+def _without_case_patterns(tokens):
+    """tokens without the patterns of `case WORD in PATTERN) …;; esac`, which
+    are words bash matches, not commands it runs."""
+    out, cases, pattern, first, start = [], [], False, False, True
+    for kind, value in tokens:
+        if pattern:
+            if kind == "op" and value == "\n":
+                continue
+            if first and kind == "word" and value == "esac":
+                cases.pop()
+                pattern, start = False, False
+                out += [("op", ";"), (kind, value)]
+                continue
+            first = False
+            if kind == "op" and value == ")":
+                pattern, start = False, True
+                out.append(("op", ";"))
+            continue
+        if kind == "word" and start and value == "case":
+            cases.append("head")
+        elif kind == "word" and cases and cases[-1] == "head" and value == "in":
+            cases[-1], pattern, first = "body", True, True
+            out.append((kind, value))
+            continue
+        elif kind == "word" and start and value == "esac" and cases:
+            cases.pop()
+        elif kind == "op" and value in (";;", ";&", ";;&") and cases and cases[-1] == "body":
+            out.append(("op", ";"))
+            pattern, first = True, True
+            continue
+        out.append((kind, value))
+        start = kind == "op" or (kind == "word" and value in KEYWORDS)
+    return out
 
 
 def _exact_chunks(text):
     """(chunks, sure): the whole text lexed, or line by line when it doesn't lex."""
     try:
-        return [lex_exact(text)], True
+        return [_without_case_patterns(lex_exact(text))], True
     except Unparsed:
         chunks = []
         for line in text.split("\n"):
             try:
-                chunks.append(lex_exact(line))
+                chunks.append(_without_case_patterns(lex_exact(line)))
             except Unparsed:
                 pass
         return chunks, False

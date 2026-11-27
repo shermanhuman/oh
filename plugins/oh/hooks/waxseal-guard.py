@@ -8,38 +8,50 @@ never at code or prose. It refuses:
 
 - any `gcloud secrets` verb other than list, describe, get-iam-policy,
   versions list|describe and locations, run directly, through a wrapper (sudo,
-  env, xargs, mise exec, find -exec, ...), inside `bash -c`/`su -c`/`ssh`/
-  `eval`/`watch`/`env -S` strings, a heredoc fed to a shell, a shell script
-  about to run, or a command substitution;
+  env, xargs, mise exec, coproc, find -exec, ...), inside `bash -c`, `su -c`,
+  `ssh`, `eval`, `watch`, `env -S` or `trap` strings, a heredoc fed to a shell,
+  a script a shell or `source` runs, or a command substitution (unquoted
+  heredoc bodies included);
 - a Secret Manager URL handed to curl/wget/http/xh, directly or through a
   variable set in the same command;
-- `kubeseal` (Sealed Secrets is retired), the same ways.
+- any command whose run text names a value read or write (`secrets … versions
+  … access|add`, `secrets … create … --data-file`, `…/versions/…:access`,
+  `:addVersion`), quotes and escapes taken out first, however the rest of it
+  reads (`BACKSTOP`): bash runs strings as code in ways no lexer models
+  (`mapfile -C`, `PS4`, `${x@P}`, interpreter argvs);
+- `kubeseal` (Sealed Secrets is retired), the same ways, best-effort.
 
-It reads the text the way bash does (`shell.lex_exact`). Where it can't be
-sure it has (the text doesn't lex, a heredoc doesn't end the way bash would end
-it, the text is too long or nested too deep, the program or a gcloud command
-word is a variable or expansion, a shell reads commands from stdin, an alias
-is defined), it refuses the text if it mentions Secret Manager (`MENTION`),
-and otherwise lets it through as before.
+It reads the text the way bash does (`shell.lex_exact`, `place_heredocs`).
+Where it can't be sure it has (the text doesn't lex, a heredoc doesn't end the
+way bash would end it, the text is too long or nested too deep, the program is
+a variable or expansion followed by `secrets` or nothing, a gcloud command word
+is one, a shell reads commands from stdin, an alias is defined, a script can't
+be read, the guard itself fails or runs past its deadline), it refuses the text
+if it mentions Secret Manager (`MENTION`, on the lexed words when the text reads
+for certain), and otherwise lets it through as before.
 
-Not covered, by design or because no per-command hook can see it: interpreter
-code (Python, Node, Go ...) using a Secret Manager client; a `PATH` shim, an
-alias or function from the user's shell snapshot, login profiles or
+Not covered, by design or because no per-command hook can see it: a `PATH`
+shim, an alias or function from the user's shell snapshot, login profiles or
 `$BASH_ENV` written by an earlier command; a persisted `gcloud config set
-core/log_http true`. Commit messages, PR bodies, grep patterns and documents
-written through heredocs are data and pass.
+core/log_http true`; names assembled at run time (`${s}s`, base64) inside
+strings bash evaluates; interpreter code using a Secret Manager client library.
+Commit messages, PR bodies and documents written through quoted heredocs are
+data and pass.
 
 Reads the hook event on stdin (Claude Code and Codex send the same shape for
 the Bash tool) and prints a deny decision, or nothing to let the call through.
-It fails open, with a note on stderr, on anything unexpected: a broken guard
-must not stop every command. Off inside waxseal's and oh's own source trees,
-whose code and tests use these tools on purpose.
+It fails open, with a note on stderr, on anything unexpected unless the text
+mentions Secret Manager: a broken guard must not stop every command. Inside
+waxseal's and oh's own source trees, whose code and tests name these on
+purpose, only a plain gcloud or API refusal applies (anyone can make such a
+tree).
 """
 import importlib.util
 import json
 import os
 import pathlib
 import re
+import signal
 import sys
 
 
@@ -74,7 +86,8 @@ NESTED = SHELLS | {"gcloud", "eval"}
 SECRET_HOST = re.compile(r"secretmanager(\.[a-z0-9-]+\.rep)?\.googleapis\.com(:\d+)?", re.I)
 SECRET_API = re.compile(SECRET_HOST.pattern + r"/v\d\w*/projects/", re.I)
 # Text that mentions Secret Manager: when the guard can't read a text for certain, it refuses it only if this matches.
-MENTION = re.compile(r"(?i:secretmanager)|\bsecrets\b(?![./-])")
+MENTION = re.compile(r"(?i:secretmanager)|(?<![-_./])\bsecrets\b(?![-_./])")
+ARRAY_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?=")
 KUBESEAL_ARG = re.compile(r"(^|/)kubeseal($|[:@])|sealed-secrets-kubeseal")
 GCLOUD_SWITCHES = {
     "-q", "--quiet", "-h", "--help", "--log-http", "--no-user-output-enabled", "--user-output-enabled",
@@ -86,51 +99,75 @@ GCLOUD_VALUE_FLAGS = {
     "--flags-file", "--trace-token", "--secret", "--region", "--zone",
 }
 GCLOUD_READS = (["list"], ["describe"], ["get-iam-policy"], ["versions", "list"], ["versions", "describe"], ["locations"])
-MAX_READINGS = 64
+# A value read or write named in the text the shell runs, however the guard reads the rest of it.
+BACKSTOP = re.compile(
+    r"\bsecrets\b[^\n]{0,120}?\bversions\b[^\n]{0,120}?\b(?:access|add)\b"
+    r"|\bsecrets\b[^\n]{0,120}?\bcreate\b[^\n]*?--data-file"
+    r"|/versions/[^\s'\"]{0,200}:access\b|:addVersion\b"
+)
+MAX_STATES = 2000
 DEPTH = 4
+RELAXED = [False]  # set inside waxseal's and oh's own trees: no backstop there
+TIME_LIMIT = 5  # seconds; the hook's own timeout is 10, and a killed guard lets the command run
 
 KUBESEAL = "runs kubeseal"
 GCLOUD = "changes or reads Secret Manager with gcloud"
 API = "calls the Secret Manager API directly"
 UNSURE = "mentions Secret Manager in a form the guard can't read for certain"
+NAMED = "names a Secret Manager value read or write"
+
+
+def plain(text):
+    """text with quoting taken out: escapes decoded (\\x73, \\163, \\u0073),
+    then backslash-newlines, quotes and backslashes removed, so a word split by
+    quotes or spelled in escapes (`secr''ets`, `$'\\x73ecrets'`) reads whole."""
+    text = re.sub(r"\\x([0-9A-Fa-f]{1,2})|\\u([0-9A-Fa-f]{1,4})", lambda m: chr(int(m.group(1) or m.group(2), 16)), text)
+    text = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8) & 0xFF), text)
+    return re.sub(r"['\"\\]", "", text.replace("\\\n", ""))
 
 
 def mentions(text):
-    return bool(MENTION.search(text))
+    return bool(MENTION.search(text) or MENTION.search(plain(text)))
 
 
 def gcloud_readings(args):
-    """Every way gcloud could split args into command words: a flag it doesn't
-    know (no `=`, before a word) may or may not take that word as its value."""
-    readings = [[]]
-    i = 0
-    while i < len(args):
+    """The first three command words of every way gcloud could read args (a
+    flag it doesn't know, with no `=`, before a word may or may not take that
+    word as its value), or None past MAX_STATES. Each word is (text, expanded)."""
+    frontier, results, count = {0: {()}}, set(), 0
+    for i in range(len(args) + 1):
+        states = frontier.pop(i, None)
+        if not states:
+            continue
+        count += len(states)
+        if count > MAX_STATES:
+            return None
+        if i == len(args) or args[i] == "--":
+            results |= states
+            continue
         arg = args[i]
         nxt = args[i + 1] if i + 1 < len(args) else None
-        if arg == "--":
-            break
         if arg.startswith("-"):
-            known_switch = arg in GCLOUD_SWITCHES or arg.startswith("--no-") or "=" in arg
-            if known_switch or nxt is None or nxt.startswith("-"):
-                i += 1
+            switch = arg in GCLOUD_SWITCHES or arg.startswith("--no-") or "=" in arg
+            if switch or nxt is None or nxt.startswith("-"):
+                frontier.setdefault(i + 1, set()).update(states)
             elif arg in GCLOUD_VALUE_FLAGS:
-                i += 2
-            else:
-                if len(readings) * 2 > MAX_READINGS:
-                    return None
-                # Taking the value: the word is skipped. Not taking it: the word counts.
-                readings = [r + ["\0skip"] for r in readings] + [r + [nxt] for r in readings]
-                i += 2
+                frontier.setdefault(i + 2, set()).update(states)
+            else:  # taking the value skips the word; not taking it leaves the word to count
+                frontier.setdefault(i + 2, set()).update(states)
+                frontier.setdefault(i + 1, set()).update(states)
             continue
-        readings = [r + [arg] for r in readings]
-        i += 1
-    out = []
-    for reading in readings:
-        words = [w for w in reading if w != "\0skip"]
-        while words and words[0] in ("alpha", "beta") and not isinstance(words[0], Expanded):
-            words = words[1:]
-        out.append(words)
-    return out
+        word = (str(arg), isinstance(arg, Expanded))
+        moved = set()
+        for state in states:
+            if not state and word in (("alpha", False), ("beta", False)):
+                moved.add(state)
+            elif len(state) < 3 and not (state and state[0] != ("secrets", False)):
+                moved.add(state + (word,))
+            else:
+                moved.add(state)
+        frontier.setdefault(i + 1, set()).update(moved)
+    return [list(state) for state in results]
 
 
 def gcloud_reason(args, mentioned):
@@ -143,17 +180,26 @@ def gcloud_reason(args, mentioned):
             if mentioned:
                 return UNSURE
             continue
-        if isinstance(words[0], Expanded):
+        if words[0][1]:
             if mentioned:
                 return UNSURE
             continue
-        if words[0] != "secrets":
+        if words[0][0] != "secrets":
             continue
-        if any(isinstance(w, Expanded) for w in words[1:3]):
-            return GCLOUD
-        if not any(words[1:1 + len(read)] == read for read in GCLOUD_READS):
+        texts = [text for text, _ in words[1:3]]
+        if not any(texts[:len(read)] == read for read in GCLOUD_READS):
             return GCLOUD
     return None
+
+
+def dynamic_program(args):
+    """For a program that is a variable or expansion: True when what follows
+    could make it a Secret Manager command (`$g secrets …`, `$g $verb`, or
+    nothing at all, as in `$cmd`)."""
+    readings = gcloud_readings(args)
+    if readings is None:
+        return True
+    return any(not words or words[0][1] or words[0][0] == "secrets" for words in readings)
 
 
 def shell_command(args):
@@ -164,7 +210,7 @@ def shell_command(args):
         if arg == "--":
             i += 1
             break
-        if arg in ("-o", "+o", "-O", "+O", "--rcfile", "--init-file"):
+        if arg in ("--rcfile", "--init-file"):
             i += 2
             continue
         if re.fullmatch(r"[-+][A-Za-z]+", arg):
@@ -192,35 +238,45 @@ def string_runner(name, args):
 
 
 def split_string(argv):
-    """The string `env -S '…'` (or --split-string) splits into a command, if any."""
+    """The string `env -S '…'` (or --split-string) splits into a command, if any,
+    wherever env sits among the wrappers (`timeout 5 env -S …`, `env env -S …`)."""
     for i, word in enumerate(argv):
-        if word == "env":
-            for option in argv[i + 1:]:
-                if option.startswith("--split-string="):
-                    return option.split("=", 1)[1]
-                if option.startswith("-S") and len(option) > 2:
-                    return option[2:]
-                if option in ("-S", "--split-string"):
-                    k = argv.index(option, i + 1)
-                    return argv[k + 1] if k + 1 < len(argv) else None
-                if not option.startswith("-") and not ASSIGNMENT.match(option):
-                    return None
-            return None
-        if not ASSIGNMENT.match(word) and word not in shell.KEYWORDS and word not in shell.RUNNERS:
-            return None
+        if word != "env":
+            continue
+        k = i + 1
+        while k < len(argv) and (argv[k].startswith("-") or ASSIGNMENT.match(argv[k])):
+            option = argv[k]
+            if option.startswith("--split-string="):
+                return option.split("=", 1)[1]
+            if option in ("-S", "--split-string"):
+                return argv[k + 1] if k + 1 < len(argv) else None
+            if option.startswith("-S"):
+                return option[2:]
+            k += 1
     return None
+
+
+def unwrap(argv):
+    """program(), also past `coproc cmd` and `coproc NAME { cmd; }`."""
+    argv = program(argv)
+    while argv and (argv[0] == "coproc" or ARRAY_ASSIGNMENT.match(argv[0])):
+        if argv[0] == "coproc":
+            argv = program(argv[2:] if len(argv) > 2 and argv[2] == "{" else argv[1:])
+        else:  # `ROW[key]=value` and `x+=1` are assignments too
+            argv = program(argv[1:])
+    return argv
 
 
 def argv_reason(argv, cwd, depth, mentioned, nested=True):
     string = split_string(argv)
     if string is not None:
         return reason_for(string, cwd, depth + 1, mentioned)
-    argv = program(argv)
+    argv = unwrap(argv)
     if not argv:
         return None
     name = os.path.basename(argv[0])
     args = argv[1:]
-    if mentioned and (isinstance(argv[0], Expanded) or argv[0] == ""):
+    if mentioned and (isinstance(argv[0], Expanded) or argv[0] == "") and dynamic_program(args):
         return UNSURE  # `$g secrets …`, `$(echo gcloud) secrets …`, `{gcloud,} secrets …`
     if name in LOOKUPS and not (name == "hash" and "-p" in args):
         return None
@@ -234,6 +290,14 @@ def argv_reason(argv, cwd, depth, mentioned, nested=True):
             if why:
                 return why
     return None
+
+
+def script_reason(script, cwd, depth, mentioned):
+    """A file a shell is told to run, whatever its name; one it can't read counts as unsure."""
+    path, text = shell.read_script(script, cwd)
+    if text is None:
+        return UNSURE if mentioned and not str(script).startswith("/dev/") else None
+    return reason_for(text, str(path.parent), depth + 1, mentioned)
 
 
 def first_reason(argv, name, args, cwd, depth, mentioned):
@@ -251,9 +315,10 @@ def first_reason(argv, name, args, cwd, depth, mentioned):
         if string is not None:
             return reason_for(string, cwd, depth + 1, mentioned)
         if script is not None:
-            path, text = shell_script(script, cwd)
-            return reason_for(text, str(path.parent), depth + 1, mentioned) if text else None
+            return script_reason(script, cwd, depth, mentioned)
         return None
+    if name in ("source", ".") and args:
+        return script_reason(args[0], cwd, depth, mentioned)
     if name in STRING_RUNNERS:
         string = string_runner(name, args)
         if string is not None:
@@ -264,6 +329,9 @@ def first_reason(argv, name, args, cwd, depth, mentioned):
             return reason_for(text, str(path.parent), depth + 1, mentioned)
     if name == "eval":
         return reason_for(" ".join(args), cwd, depth + 1, mentioned)
+    if name == "trap":
+        action = next((a for a in args if not a.startswith("-")), None)
+        return reason_for(action, cwd, depth + 1, mentioned) if action else None
     if name == "ssh":
         i = 0
         while i < len(args) and args[i].startswith("-"):
@@ -311,7 +379,7 @@ def stdin_shell(stages):
     `… | bash`, `bash -s`, `bash <<< '…'`, `bash < file`."""
     previous = None
     for argv, redirects, end in stages:
-        run = program(argv)
+        run = unwrap(argv)
         if run and os.path.basename(run[0]) in SHELLS and shell_command(run[1:]) == (None, None) or (
             run and os.path.basename(run[0]) in SHELLS and "-s" in run[1:]
         ):
@@ -331,17 +399,36 @@ def reason_for(text, cwd, depth=0, mentioned=False):
         return None
     if depth > DEPTH or len(text) > MAX_TEXT:
         return UNSURE if mentioned or mentions(text) else None
-    main, docs, sure = place_heredocs(text)
-    mentioned = mentioned or mentions(main) or (not sure and mentions(text))
-    if not sure and mentioned:
+    main, docs, placed = place_heredocs(text)
+    if (BACKSTOP.search(main) or BACKSTOP.search(plain(main))) and not RELAXED[0]:
+        return NAMED
+    commands, substs, lexed = exact_commands(main)
+    stages = exact_pipes(main)[0]
+    # Read for certain, the words say what bash sees (comments and data heredocs aren't words);
+    # otherwise the raw text is all there is.
+    mentioned = mentioned or (
+        any(mentions(word) for argv in commands for word in argv) or any(mentions(inner) for inner in substs)
+        or any(mentions(target) for _, redirects, _ in stages for _, target in redirects)
+        if placed and lexed else mentions(text)
+    )
+    if mentioned and not (placed and lexed):
         return UNSURE
-    for header, start, end, body in docs:
+    for header, start, end, body, quoted in docs:
         why = heredoc_reason(header, start, end, body, cwd, depth, mentioned)
         if why:
             return why
-    commands, substs, sure = exact_commands(main)
-    if not sure and mentioned:
-        return UNSURE
+        if not quoted:
+            # An unquoted heredoc's body is expanded: its substitutions run, whoever reads it.
+            try:
+                spans = shell._inner_substs(body, 0, len(body), quoted=True)
+            except shell.Unparsed:
+                if mentioned or mentions(body):
+                    return UNSURE
+                spans = []
+            for inner_start, inner_end in spans:
+                why = reason_for(body[inner_start:inner_end], cwd, depth + 1, mentioned)
+                if why:
+                    return why
     for inner in substs:
         why = reason_for(inner, cwd, depth + 1, mentioned)
         if why:
@@ -356,7 +443,7 @@ def reason_for(text, cwd, depth=0, mentioned=False):
         why = argv_reason(argv, cwd, depth, mentioned)
         if why:
             return why
-    if mentioned and stdin_shell(exact_pipes(main)[0]):
+    if mentioned and stdin_shell(stages):
         return UNSURE
     return None
 
@@ -381,11 +468,17 @@ def decide(event):
     cwd = event.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         cwd = os.getcwd()
-    if exempt(cwd):
-        return None
+    RELAXED[0] = exempt(cwd)
     why = reason_for(command_text(event.get("tool_input")), cwd)
-    if not why:
+    # In waxseal's and oh's own trees, whose code and tests name these on purpose, only a
+    # command that plainly runs gcloud secrets or calls the API is refused. Anyone can make
+    # such a tree, so the exemption never covers those.
+    if not why or (why in (KUBESEAL, UNSURE) and RELAXED[0]):
         return None
+    return message_for(why)
+
+
+def message_for(why):
     message = (
         f"Blocked by oh: this command {why}. Agents never read or write a secret value. "
         "Values live in Google Secret Manager (project waxseal-infra-secrets) and reach the cluster "
@@ -394,17 +487,33 @@ def decide(event):
         "(`gcloud secrets list|describe`, `gcloud secrets versions list|describe`), and so is editing "
         "an ExternalSecret manifest. If you need a value set or changed, ask the user; don't work around this."
     )
+    if why == NAMED:
+        message += " If you're only writing about it (a commit message, a PR comment), put the text in a file or a quoted heredoc (`<<'EOF'`)."
     if why == UNSURE:
         message += " If this command doesn't touch a secret value, write it more plainly (no variable or substitution as the program, no unclosed quotes, heredocs that end on their own line) and run it again."
     return message
 
 
+def timed_out(signum, frame):
+    raise TimeoutError(f"took over {TIME_LIMIT} seconds")
+
+
 def main():
+    raw = sys.stdin.read()
     try:
-        message = decide(json.load(sys.stdin))
-    except Exception as error:  # fail open, but say so
+        signal.signal(signal.SIGALRM, timed_out)
+        signal.alarm(TIME_LIMIT)
+        message = decide(json.loads(raw))
+        signal.alarm(0)
+    except Exception as error:
+        signal.alarm(0)
+        # Fail open, but say so; fail closed when the text mentions Secret Manager.
         print(f"waxseal-guard: skipped ({type(error).__name__}: {error})", file=sys.stderr)
-        return
+        try:
+            text = command_text(json.loads(raw).get("tool_input"))
+        except Exception:
+            text = raw
+        message = message_for(UNSURE) if isinstance(text, str) and mentions(text) else None
     if message:
         print(json.dumps({
             "hookSpecificOutput": {
