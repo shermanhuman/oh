@@ -7,12 +7,12 @@ goes ahead without asking, except a destructive change inside it. It looks
 only at what a shell would execute, using the parser in shell.py.
 
 Allowed, the one merge an agent makes itself (Sugarhouse's decision 96):
-`gh pr merge <full PR URL> --squash` through Sugarhouse's wrapper (also via
-`mise exec --` or `sugar gh`), which asks the board and refuses anything but a
-green squash into rc or hotfix. The wrapper refuses other methods, `--admin`,
-`--auto` and `-R`; the guard refuses
-`--as-owner`; when the gh that runs isn't a wrapper that checks merges (an
-older one, the real gh by path or first on PATH), or over ssh, it's denied.
+`mise exec -- gh pr merge <full PR URL> --squash`, where Sugarhouse's mise
+entry makes gh its wrapper, which asks the board and refuses anything but a
+green squash into rc or hotfix (other methods, --admin, --auto and -R
+included). The wrapper must carry the merge-check mark and the sugar it runs
+must hold it, so an older or rolled-back sugar is denied. Bare gh, the
+wrapper or the real gh by path, `sugar gh`, `--as-owner` and ssh are denied.
 
 Denied, because they are always the user's step:
 - any other `gh pr merge`, `gh api` merging a pull request (REST PUT or a GraphQL
@@ -310,48 +310,55 @@ def git_finding(args, where):
 
 
 PR_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+/?")
-# Written into the wrapper by a sugar whose `gh` checks merges with the board
-# (sugarhouse 0.19.0 and later); an older wrapper merges unchecked.
+# In a sugar whose `gh` checks merges with the board (sugarhouse 0.19.0 and
+# later): its binary holds the string, and the wrapper it writes carries it.
 MERGE_CHECK_MARK = "# sugarhouse: merge-check"
-AGENT_MERGE = ("The one merge an agent makes itself is `gh pr merge <full PR URL> --squash` through "
-               "Sugarhouse's wrapper, into rc or hotfix; ")
+AGENT_MERGE = ("The one merge an agent makes itself is `mise exec -- gh pr merge <full PR URL> --squash` "
+               "through Sugarhouse's wrapper, into rc or hotfix; any other merge is the user's. ")
 
 
 def sugarhouse_home():
     return pathlib.Path(os.environ.get("HOME") or pathlib.Path.home())
 
 
-def checking_wrapper():
-    """Sugarhouse's gh wrapper, if it's one that checks merges with the board."""
-    wrap = sugarhouse_home() / ".local/share/sugarhouse/wrap/gh"
+def wrapper_path():
+    return sugarhouse_home() / ".local/share/sugarhouse/wrap/gh"
+
+
+def is_wrapper(word, where):
+    """A gh given by path that is Sugarhouse's wrapper, or a link to it."""
+    path = pathlib.Path(os.path.expanduser(word))
+    if not path.is_absolute():
+        path = pathlib.Path(where.cwd) / path
     try:
-        return wrap.resolve() if MERGE_CHECK_MARK in wrap.read_text(errors="ignore") else None
+        return path.resolve() == wrapper_path().resolve()
     except OSError:
-        return None
+        return False
 
 
-def runs_wrapper(argv, run, where):
-    """Whether the gh this command runs is the checking wrapper (or `sugar gh`)."""
-    if where.remote:
+def checked_merge(argv, run, where):
+    """Whether this `pr merge` runs through a wrapper that checks it with the
+    board: only `mise exec -- gh` (Sugarhouse's conf.d entry puts the wrapper
+    first), with the wrapper carrying the mark and the sugar binary it runs
+    holding it too, so an older or rolled-back sugar is denied."""
+    if where.remote or run[0] != "gh" or "mise" not in argv[:len(argv) - len(run)]:
         return False
-    wrap = checking_wrapper()
-    if not wrap:
+    wrap = wrapper_path()
+    try:
+        text = wrap.read_text(errors="ignore")
+        conf = (sugarhouse_home() / ".config/mise/conf.d/sugarhouse.toml").read_text(errors="ignore")
+    except OSError:
         return False
-    word = run[0]
-    if os.path.basename(word) == "sugar":
-        return True
-    if "/" in word:
-        return pathlib.Path(os.path.expanduser(word)).resolve() == wrap
-    # `mise exec -- gh` puts the wrapper first through Sugarhouse's conf.d entry.
-    if "mise" in argv[:len(argv) - len(run)]:
-        conf = sugarhouse_home() / ".config/mise/conf.d/sugarhouse.toml"
-        try:
-            return str(wrap.parent) in conf.read_text(errors="ignore")
-        except OSError:
-            return False
-    path = {**os.environ, **where.env}.get("PATH", "")
-    found = shutil.which("gh", path=path)
-    return bool(found) and pathlib.Path(found).resolve() == wrap
+    if MERGE_CHECK_MARK not in text or str(wrap.parent) not in conf:
+        return False
+    target = re.search(r"^exec\s+'?([^'\s]+)'?\s+gh\b", text, re.M)
+    if not target:
+        return False
+    try:
+        with open(os.path.realpath(target.group(1)), "rb") as binary:
+            return MERGE_CHECK_MARK.encode() in binary.read()
+    except OSError:
+        return False
 
 
 def agent_merge(args):
@@ -364,10 +371,10 @@ def agent_merge(args):
     return any(a in ("--squash", "-s") for a in rest) and "--as-owner" not in rest
 
 
-def gh_finding(args, where, wrapped=False):
+def gh_finding(args, where, checked=None):
     words = positionals(args, GH_VALUE_OPTIONS | GH_API_VALUE_OPTIONS)
     if words[:2] == ["pr", "merge"]:
-        if wrapped and agent_merge(args):
+        if agent_merge(args) and checked and checked():
             return None
         return DENY, "merges a pull request"
     if words[:2] == ["repo", "delete"]:
@@ -628,9 +635,8 @@ def argv_findings(argv, where, depth):
                     yield from findings(text, child, depth + 1)
                 return
         return
-    wrap = checking_wrapper() if "/" in run[0] else None
-    if wrap and pathlib.Path(os.path.expanduser(run[0])).resolve() == wrap:
-        name = "gh"  # Sugarhouse's wrapper by path: its arguments are what matter
+    if "/" in run[0] and is_wrapper(run[0], where):
+        name = "gh"  # Sugarhouse's wrapper by path: its arguments are what matter, not its text
     elif "/" in run[0]:
         text = script(run[0], where)[1]
         if text:
@@ -659,9 +665,9 @@ def argv_findings(argv, where, depth):
     elif name == "git":
         yield git_finding(args, where)
     elif name == "gh":
-        yield gh_finding(args, where, wrapped=runs_wrapper(argv, run, where))
+        yield gh_finding(args, where, checked=lambda: checked_merge(argv, run, where))
     elif name == "sugar" and args[:1] == ["gh"]:
-        yield gh_finding(args[1:], where, wrapped=runs_wrapper(argv, run, where))
+        yield gh_finding(args[1:], where)
     elif name == "psql":
         yield from psql_findings(args, where, env)
     elif name in NETWORK:
@@ -785,8 +791,8 @@ def decide(event):
     if decision == DENY:
         return DENY, (
             f"Blocked by oh: this command {why}. "
-            + (AGENT_MERGE + "any other merge " if "merges a pull request" in why else "")
-            + "That step is always the user's. Stop, tell them what you "
+            + (AGENT_MERGE if "merges a pull request" in why else "That step is always the user's. ")
+            + "Stop, tell them what you "
             "wanted to do and why, and hand them the exact command (they can run it with `! <command>`). "
             "Don't look for another route to the same result."
         )
