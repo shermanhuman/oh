@@ -1,4 +1,5 @@
 import json
+import os
 import pathlib
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ import unittest
 
 GUARD = pathlib.Path(__file__).resolve().parent.parent / "plugins/oh/hooks/waxseal-guard.py"
 OUTSIDE = tempfile.mkdtemp(prefix="guard-")
+V11 = "gcloud secrets versions access latest --secret=x"
 
 # What a shell would execute: kubeseal, gcloud secrets changes or reads, Secret Manager URLs.
 DENIED = [
@@ -470,6 +472,58 @@ class Guard(unittest.TestCase):
                             "cat > r.sh <<'EOF'\n#!/bin/sh\nEOF\necho 'gcloud secrets versions destroy 3 --secret=x' >> r.sh; bash r.sh"]:
                 with self.subTest(command=command):
                     self.assertIsNotNone(run(command, cwd=d))
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads any file")
+    def test_cant_tell_isnt_missing(self):
+        """Round 11's M51: a script in a directory the guard can't search, or one it can't read at all, is unsure under a mention."""
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            (root / "root").mkdir()
+            (root / "root" / "rotate.sh").write_text("#!/bin/bash\n" + V11 + "\n")
+            (root / "rotate").write_text("#!/bin/bash\n" + V11 + "\n")
+            (root / "rotate").chmod(0o100)
+            (root / "root").chmod(0)
+            try:
+                for command in ["sudo bash root/rotate.sh; gcloud secrets list", "sudo ./root/rotate.sh; gcloud secrets list",
+                                "source root/rotate.sh && kubectl get secrets -n app", "sudo ./rotate; gcloud secrets list"]:
+                    with self.subTest(command=command):
+                        self.assertIsNotNone(run(command, cwd=d))
+                for command in ["sudo bash root/rotate.sh", "bash missing.sh; gcloud secrets list"]:
+                    with self.subTest(command=command):
+                        self.assertIsNone(run(command, cwd=d))
+            finally:
+                (root / "root").chmod(0o755)
+
+    def test_heredoc_header_read_as_bash_reads_it(self):
+        """Round 11's M52: a `>` inside quotes on the heredoc's line, or a line that starts inside a multi-line string,
+        doesn't hide the shell that runs the body."""
+        with tempfile.TemporaryDirectory() as d:
+            for command in [f"cat <<'EOF' | bash && echo \"==> done\"\n{V11}\nEOF",
+                            f"echo \"==> rotating\" && bash <<'EOF'\n{V11}\nEOF",
+                            f"bash 2>\"err log\" <<'EOF'\n{V11}\nEOF",
+                            f"cat <<'EOF' | ssh vm \"bash -s > /tmp/out.log\"\n{V11}\nEOF",
+                            f"echo \"step one\nstep two\" && bash <<'EOF'\n{V11}\nEOF",
+                            f"echo \"step one\nstep two\" && bash -c \"$(cat <<'EOF'\n{V11}\nEOF\n)\"",
+                            f"bash \\\n  <<'EOF'\n{V11}\nEOF"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
+            for command in [f"cat <<'EOF' > notes.md && echo \"==> wrote\"\n{V11}\nEOF",
+                            "gh pr comment 1 --body \"line\nok\" | tail -1; python3 -I - <<'EOF'\nprint('gcloud secrets versions access')\nEOF",
+                            f"git commit -m \"$(cat <<'EOF'\nci: stop running {V11}\nEOF\n)\""]:
+                with self.subTest(command=command):
+                    self.assertIsNone(run(command, cwd=d))
+
+    def test_mise_options_the_reader_skips(self):
+        """Round 11's M53: `mise -E prod exec -- ./x.sh`: the command after `--` is read even when mise's options aren't."""
+        with tempfile.TemporaryDirectory() as d:
+            (pathlib.Path(d) / "rotate.sh").write_text("#!/bin/bash\n" + V11 + "\n")
+            (pathlib.Path(d) / "rotate.sh").chmod(0o755)
+            for command in ["mise -E prod exec -- ./rotate.sh", "mise exec --env prod -- ./rotate.sh && gcloud secrets list"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
+            for command in ["mise exec --env prod -- kubectl get secrets -n app", "mise -E prod exec -- gcloud secrets list"]:
+                with self.subTest(command=command):
+                    self.assertIsNone(run(command, cwd=d))
 
     def test_dash_reads_stdin(self):
         """Round 10's M48: `bash -` and `sh -` read commands from stdin, like `bash -s`; `bash - x.sh` runs x.sh."""

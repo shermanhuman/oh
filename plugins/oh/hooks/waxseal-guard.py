@@ -351,6 +351,11 @@ def argv_reason(argv, cwd, depth, mentioned, nested=True):
     argv = unwrap(argv)
     if not argv:
         return None
+    if argv[0] == shell.MISE_UNREADABLE:
+        # `mise -E prod exec -- ./run.sh`: options the reader doesn't know; the command after `--` still runs.
+        if "--" in argv:
+            return argv_reason(argv[argv.index("--") + 1:], cwd, depth + 1, mentioned)
+        return UNSURE if mentioned else None
     name = os.path.basename(argv[0])
     args = argv[1:]
     if isinstance(argv[0], Expanded) and any(k in STATE["written"] for k in keys(argv[0], cwd)):
@@ -448,7 +453,7 @@ def script_reason(script, cwd, depth, mentioned):
         _, text = shell.read_script(path, cwd)
         if text is not None:
             readings += [(cwd, text), (os.path.dirname(path), text)]
-        elif mentioned and os.path.exists(path):
+        elif mentioned and not absent(path):
             return UNSURE  # there, but too long or unreadable: a script the guard can't read, not a gap
     if mentioned and any(k in STATE["redirected"] for k in keys(script, cwd)):
         return UNSURE
@@ -459,10 +464,21 @@ def script_reason(script, cwd, depth, mentioned):
     return None
 
 
+def absent(path):
+    """True when nothing is at path. A directory the guard can't search isn't absent: it can't tell."""
+    try:
+        os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def unread_script(path):
     """True for a file run directly that looks like a script (a shell suffix, a `#!` line naming a
     shell, or executable text with no `#!`) but that the readers skipped: too long or unreadable."""
-    if not os.path.isfile(path):
+    if absent(path) or os.path.isdir(path):
         return False
     try:
         if os.path.getsize(path) <= MAX_TEXT and os.access(path, os.R_OK):
@@ -470,7 +486,7 @@ def unread_script(path):
         with open(path, "rb") as f:
             head = f.read(1024)
     except OSError:
-        return pathlib.Path(path).suffix in SHELL_SUFFIXES
+        return True  # can't read even its first line: a script for all the guard knows
     first = head.split(b"\n", 1)[0]
     if pathlib.Path(path).suffix in SHELL_SUFFIXES or (first.startswith(b"#!") and re.search(rb"\b(ba|z|da|k)?sh\b", first)):
         return True
@@ -603,11 +619,11 @@ def heredoc_reason(header, start, end, body, cwd, depth, mentioned):
     """A heredoc counts when a shell runs it or it becomes a shell script (`*.sh`). One
     written to any file is remembered, so a later `bash run` or `./run` reads its body."""
     before, after = innermost(header[:start]), header[end:]
-    commands = exact_commands(re.sub(r"\d*>>?\s*\S+", " ", before))[0] or [[]]
+    commands = exact_commands(before)[0] or [[]]
     argv = unwrap(commands[-1])
     name = os.path.basename(argv[0]) if argv else ""
     # `bash <<EOF`, or the heredoc piped on into a shell: `cat <<EOF | bash`, `| ssh vm bash`.
-    later = [unwrap(c) for c in exact_commands(re.sub(r"\d*>>?\s*\S+", " ", after))[0]]
+    later = [unwrap(c) for c in exact_commands(after)[0]]
     runners = SHELLS | {"ssh", "source", "."}
     if (name in runners or any(c and os.path.basename(c[0]) in runners for c in later)
             or any(os.path.basename(w) in SHELLS for w in argv[1:]) or code_string(header[:start])):

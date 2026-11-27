@@ -854,7 +854,9 @@ def place_heredocs(text):
             else:
                 sure = False
             i += 1
-            docs.append((line, op, end, "\n".join(body), quoted))
+            # The header is the text since nothing was last left open, so a line that starts
+            # inside a multi-line string still reads as bash reads it.
+            docs.append((before + line, len(before) + op, len(before) + end, "\n".join(body), quoted))
             cuts.append((op, end))
         for op, end in reversed(cuts):
             line = line[:op] + "< " + HEREDOC_PLACEHOLDER + line[end:]
