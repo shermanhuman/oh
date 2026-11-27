@@ -445,9 +445,9 @@ def script_reason(script, cwd, depth, mentioned):
     if (not readings or STATE["cut"]) and mentioned:
         return UNSURE
     for here, text in readings:
-        if text in STATE["read"]:
-            continue  # each distinct script is judged once per decision
-        STATE["read"].add(text)
+        if (text, here) in STATE["read"]:
+            continue  # each reading once per decision; its directory is part of it
+        STATE["read"].add((text, here))
         why = reason_for(text, here, depth + 1)
         if why:
             return why
@@ -665,7 +665,10 @@ def reason_for(text, cwd, depth=0, mentioned=False):
             saved, STATE["cwds"] = STATE["cwds"], []
             targets = resolve(run[1], base)
             STATE["cwds"] = saved
-            for target in targets[:1]:
+            # Plus every existing directory the target reaches from any candidate, for every value:
+            # a `cd` into a missing directory fails, so filtering by what exists drops no reading.
+            targets = targets[:1] + [t for t in resolve(run[1], cwd) if os.path.isdir(t)]
+            for target in targets:
                 if target not in STATE["cwds"]:
                     STATE["cwds"].append(target)
             if len(STATE["cwds"]) > MAX_CANDIDATES:

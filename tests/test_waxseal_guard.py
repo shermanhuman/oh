@@ -424,6 +424,25 @@ class Guard(unittest.TestCase):
                             "env -C sub bash plain", "cd a/b/c/d/e; cd ..; cd e; bash deep.sh"]:
                 with self.subTest(command=command):
                     self.assertIsNotNone(run(command, cwd=d))
+            # Every directory a cd may reach is a candidate (round 7's M37).
+            for name in ("frontend", "deploy", "svc1", "svc2", "scripts"):
+                (root / name).mkdir()
+            for name in ("deploy/push.sh", "svc2/deploy.sh", "sub/scripts/get.sh", "scripts/get.sh"):
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text("gcloud secrets versions destroy 3 --secret=x\n")
+            for command in ["(cd frontend && echo build) && cd deploy && bash push.sh",
+                            "for s in svc1 svc2; do cd $s && bash deploy.sh; cd ..; done",
+                            "D=svc1; [ -d svc2 ] && D=svc2; cd $D && bash deploy.sh",
+                            "pushd sub && ls; popd; cd scripts && bash get.sh",
+                            "cd sub && ls && cd - && cd scripts && bash get.sh"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
+            # One reading per (text, directory): identical scripts in two services are both read (M38).
+            for svc in ("a", "b"):
+                (root / "services" / svc).mkdir(parents=True)
+                (root / "services" / svc / "deploy.sh").write_text('cd "$(dirname "$0")" && bash ./fetch.sh\n')
+                (root / "services" / svc / "fetch.sh").write_text("echo ok\n" if svc == "a" else "gcloud secrets versions destroy 3 --secret=x\n")
+            self.assertIsNotNone(run("bash services/a/deploy.sh && bash services/b/deploy.sh", cwd=d))
             (root / "rc").write_text("eval \"$(mise activate bash)\"\nalias ll='ls -l'\n")
             self.assertIsNone(run("source ./rc; kubectl get secrets -n app", cwd=d))
             self.assertIsNone(run("cd sub && bash ok.sh && kubectl get secrets -n app", cwd=d))
@@ -453,6 +472,9 @@ class Guard(unittest.TestCase):
             "\n".join(f"cat <<'EOF{i}'\nbody\nEOF{i}" for i in range(5000)) + "\ngcloud secrets versions destroy 3 --secret=x",
             "echo " + '"$(echo ' * 2000 + "x" + ')"' * 2000 + "; gcloud secrets list",
             "x='\n" + "<<\n" * 60000 + "'\ng=gcloud; $g sec$'r'ets versions destroy 3 --secret=x",
+            # Round 6's M35 shape: nested cds and a chain of written scripts, once grew as copies^depth.
+            "cd a; cd b; cd c; cd d; cd e; cd ..; cd ..\n" + "".join(
+                f"cat > s{i} <<'EOF'\nsource ./s{i + 1}\nEOF\n" for i in range(4)) + "cat > s4 <<'EOF'\ngcloud secrets versions destroy 3 --secret=x\nEOF\nbash s0",
         ]
         for command in commands:
             with self.subTest(command=command[:40]):
