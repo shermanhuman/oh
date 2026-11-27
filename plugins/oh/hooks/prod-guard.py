@@ -346,7 +346,7 @@ def checked_merge(argv, run, where):
     if where.remote or run[0] != "gh" or not found_mise:
         return "it isn't `mise exec -- gh`"
     at, m = found_mise
-    if m.start is None or argv[m.start:] != run:
+    if m.unreadable or m.start is None or argv[m.start:] != run:
         return "it isn't `mise exec -- gh`"
     wrap = wrapper_path()
     try:
@@ -374,10 +374,11 @@ def checked_merge(argv, run, where):
     mise = argv[at] if "/" in argv[at] else shutil.which("mise", path=env.get("PATH", ""))
     error = ""
     try:
-        out = subprocess.run([os.path.expanduser(mise or "mise"), *m.options, "env", "--json"],
+        out = subprocess.run([os.path.expanduser(mise or "mise"), "env", "--json"],
                              cwd=where.cwd, env=env, capture_output=True, text=True, timeout=5)
         path = json.loads(out.stdout).get("PATH", "") if out.returncode == 0 else None
-        error = (out.stderr.strip().splitlines() or [""])[-1][:200]
+        lines = [l.strip() for l in out.stderr.splitlines() if l.strip() and not l.strip().startswith("Run with")]
+        error = (lines[0] if lines else "")[:200]
     except (OSError, subprocess.SubprocessError, ValueError, AttributeError) as e:
         path, error = None, str(e)[:200]
     if path is None:
@@ -674,6 +675,11 @@ def argv_findings(argv, where, depth):
         if text:
             yield from findings(text, child, depth + 1)
             return
+    if run[0] == shell.MISE_UNREADABLE:
+        yield DENY, ("runs a `mise exec` the guard can't read (an option other than -C, -q, -y, -v or -c, or a "
+                     "joined form such as -qC or -Cdir). Write it plainly, `mise exec -- <command>` or "
+                     "`mise -C <dir> exec -- <command>`, and run it again: this isn't a step reserved for the user")
+        return
     if name == "eval":
         yield from findings(" ".join(args), child, depth + 1)
     elif name == "ssh":
@@ -820,6 +826,8 @@ def decide(event):
     decision, why = next((f for f in found if f[0] == DENY), None) or (found[0] if found else (None, None))
     if not decision:
         return None
+    if decision == DENY and "the guard can't read" in why:
+        return DENY, f"Blocked by oh: this command {why}."
     if decision == DENY:
         return DENY, (
             f"Blocked by oh: this command {why}. "

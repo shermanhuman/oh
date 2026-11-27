@@ -174,56 +174,67 @@ def simple_commands(text):
     return [argv for argv in commands if argv], substs
 
 
-# mise's options that take a value: global ones (before the subcommand), and
-# exec's own (after `exec` or `x`).
-MISE_GLOBAL_VALUE_OPTIONS = {"-C", "--cd", "-E", "--env", "-j", "--jobs", "--output", "-P", "--profile", "--log-level"}
-MISE_EXEC_VALUE_OPTIONS = {"-C", "--cd", "-c", "--command", "-j", "--jobs"}
+# The mise options the guard reads. Anything else in a `mise exec` (another
+# option, a joined form such as -qC or -Cdir, -E or -P which change the
+# config) makes it unreadable, and the production guard refuses it with the
+# plain form to use instead: mise's syntax is wider than any list.
+MISE_FLAGS = {"-q", "--quiet", "-y", "--yes", "-v", "--verbose"}
+
+
+MISE_UNREADABLE = "<mise the guard can't read>"
 
 
 class MiseExec:
-    """One `mise [global options] exec|x [options] [tools] (-- argv | -c text)`.
-    The single place the guard reads a mise command: the directories it moves
-    into (-C, before or after exec), the global options to ask mise with, the
-    `-c` text it runs, and where the command after `--` starts."""
+    """One `mise [-C dir] exec|x [-C dir] [tools] (-- argv | -c text)`, the
+    only place the guard reads a mise command: the directory it runs in (the
+    last -C, from where mise starts), its -c text, and where the command after
+    `--` starts. `unreadable` is set for anything outside that form."""
 
     def __init__(self):
-        self.dirs, self.options, self.command, self.start = [], [], None, None
+        self.dir, self.command, self.start, self.unreadable = None, None, None, False
 
 
-def _option(argv, j, value_options):
-    """(name, value, next index) for the option at j, `--name=value` included."""
-    word = argv[j]
-    if word.startswith("--") and "=" in word:
-        name, value = word.split("=", 1)
-        return name, value, j + 1
-    if word in value_options:
-        return word, (argv[j + 1] if j + 1 < len(argv) else ""), j + 2
-    return word, None, j + 1
+def _mise_options(argv, j, m, allow_command):
+    """Read options from j up to a non-option or `--`; returns the next index."""
+    while j < len(argv) and argv[j].startswith("-") and argv[j] != "--":
+        word = argv[j]
+        if word in MISE_FLAGS:
+            j += 1
+        elif word in ("-C", "--cd") and j + 1 < len(argv):
+            m.dir, j = argv[j + 1], j + 2
+        elif word.startswith("--cd="):
+            m.dir, j = word.split("=", 1)[1], j + 1
+        elif allow_command and word in ("-c", "--command") and j + 1 < len(argv):
+            m.command, j = argv[j + 1], j + 2
+        elif allow_command and word.startswith("--command="):
+            m.command, j = word.split("=", 1)[1], j + 1
+        else:
+            m.unreadable = True
+            return len(argv)
+    return j
 
 
 def mise_exec(argv, i):
     """The MiseExec for a mise command at argv[i], or None if it isn't exec."""
     if os.path.basename(argv[i]) != "mise":
         return None
-    m, j = MiseExec(), i + 1
-    while j < len(argv) and argv[j].startswith("-") and argv[j] != "--":
-        name, value, j = _option(argv, j, MISE_GLOBAL_VALUE_OPTIONS)
-        if name in ("-C", "--cd"):
-            m.dirs.append(value)
-        else:
-            m.options += [name] if value is None else [name, value]
+    m = MiseExec()
+    j = _mise_options(argv, i + 1, m, False)
+    if m.unreadable:
+        # Can't tell the subcommand: unreadable only if exec or x is in it.
+        if any(w in ("exec", "x") for w in argv[i + 1:]):
+            return m
+        return None
     if j >= len(argv) or argv[j] not in ("exec", "x"):
         return None
     j += 1
-    while j < len(argv) and argv[j] != "--":
+    while j < len(argv) and argv[j] != "--" and not m.unreadable:
         if argv[j].startswith("-"):
-            name, value, j = _option(argv, j, MISE_EXEC_VALUE_OPTIONS)
-            if name in ("-C", "--cd"):
-                m.dirs.append(value)
-            elif name in ("-c", "--command"):
-                m.command = value
+            j = _mise_options(argv, j, m, True)
         else:
             j += 1  # a tool, such as gh@2
+    if m.unreadable:
+        return m
     if j < len(argv) and m.command is None:
         m.start = j + 1
     return m
@@ -247,7 +258,10 @@ def _walk(argv):
                 i += 1
         elif mise_exec(argv, i):
             m = mise_exec(argv, i)
-            dirs += m.dirs
+            if m.unreadable:
+                return [MISE_UNREADABLE] + argv[i:], dirs
+            if m.dir is not None:
+                dirs.append(m.dir)
             if m.command is not None:
                 return ["sh", "-c", m.command], dirs  # read like any shell's -c text
             if m.start is None:

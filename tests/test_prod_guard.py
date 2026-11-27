@@ -381,6 +381,36 @@ class AgentMerge(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.decision(command), "deny")
 
+    def test_a_mise_exec_the_guard_cannot_read_is_refused_with_the_plain_form(self):
+        self.wrap()
+        for command in ["mise -qC /tmp exec -- ls", "mise -Cwork exec -- ls", "mise -C=work exec -- ls",
+                        "mise x -c'ls'", "mise x -c='ls'", "mise x -qc 'ls'", "mise -E prod exec -- ls",
+                        f"mise x -E prod -- gh pr merge {URL} --squash", f"mise exec -P prod -- gh pr merge {URL} --squash"]:
+            with self.subTest(command=command):
+                out = run(command, env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
+                self.assertEqual(out["permissionDecision"], "deny")
+                self.assertIn("mise exec -- <command>", out["permissionDecisionReason"])
+        # Plain forms, and mise commands that aren't exec, are untouched.
+        for command in ["mise exec -- ls", "mise x node@22 -- node -v", "mise -q exec -- ls", "mise run test",
+                        "mise use -g gh@2", "mise -v", "mise -C /tmp x -- ls"]:
+            with self.subTest(command=command):
+                self.assertIsNone(self.decision(command))
+
+    def test_a_mise_error_shows_its_cause(self):
+        self.wrap()
+        mise = self.realdir / "mise"
+        mise.write_text("#!/bin/sh\necho 'mise ERROR Config files in ~/p/mise.toml are not trusted.' >&2\n"
+                        "echo 'Run with --verbose or MISE_VERBOSE=1 for more information' >&2\nexit 1\n")
+        out = run(f"mise exec -- gh pr merge {URL} --squash", env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
+        self.assertIn("are not trusted", out["permissionDecisionReason"])
+
+    def test_the_last_mise_c_wins(self):
+        self.wrap()
+        project = self.home / "project"
+        project.mkdir()
+        (project / "mise-path").write_text(f"{self.realdir}:{self.wrapdir}")
+        self.assertEqual(self.decision(f"mise -C {self.home} exec -C {project} -- gh pr merge {URL} --squash"), "deny")
+
     def test_global_mise_options_were_a_blind_spot(self):
         for command in ["mise -C /tmp exec -- git push --force", "mise -q x -- git push origin HEAD:main",
                         "/usr/local/bin/mise exec -- git push --force"]:
@@ -454,6 +484,7 @@ class Guard(unittest.TestCase):
             self.check([f"git -C {work} push", f"cd {work} && git push"], "deny")
             # mise's -C moves the command into the repository, before or after exec.
             self.check([f"mise -C {work} exec -- git push", f"mise x -C {work} -- git push origin HEAD"], "deny")
+            self.check([f"mise -C /tmp exec -C {work} -- git push"], "deny")
             git("switch", "-q", "-c", "feat/x", cwd=work)
             self.check(["git push", "git push origin HEAD", "git push -u origin feat/x"], None, cwd=str(work))
             self.check(["git push origin HEAD:trunk", "git push origin main"], "deny", cwd=str(work))
