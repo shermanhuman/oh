@@ -80,10 +80,16 @@ LOOKUPS = {"which", "type", "whereis", "hash"}
 STRING_RUNNERS = {"su", "runuser", "script", "flock"}
 # Programs worth finding again as a later word of an argv (`find -exec`, `parallel`, `setsid` ...).
 NESTED = SHELLS | {"gcloud", "eval"}
+# Programs that run their later words as a command. A later word under anything else may
+# be data (`grep -e gcloud $f`), so only a plain refusal counts there.
+RUNS_LATER = {
+    "find", "parallel", "setsid", "ionice", "chrt", "taskset", "unshare", "nsenter", "chroot", "doas",
+    "strace", "ltrace", "systemd-run", "sg", "runuser", "flock", "nohup", "prlimit", "numactl", "firejail",
+}
 
 # The global and regional hosts (secretmanager.<region>.rep.googleapis.com), any port.
 # Secret and version resources live under /v1/projects/...; the discovery document doesn't.
-SECRET_HOST = re.compile(r"secretmanager(\.[a-z0-9-]+\.rep)?\.googleapis\.com(:\d+)?", re.I)
+SECRET_HOST = re.compile(r"secretmanager(\.mtls)?(\.[a-z0-9-]+\.rep)?\.googleapis\.com(:\d+)?", re.I)
 SECRET_API = re.compile(SECRET_HOST.pattern + r"/v\d\w*/projects/", re.I)
 # Text that mentions Secret Manager: when the guard can't read a text for certain, it refuses it only if this matches.
 MENTION = re.compile(r"(?i:secretmanager)|(?<![-_./])\bsecrets\b(?![-_./])")
@@ -103,11 +109,12 @@ GCLOUD_READS = (["list"], ["describe"], ["get-iam-policy"], ["versions", "list"]
 BACKSTOP = re.compile(
     r"\bsecrets\b[^\n]{0,120}?\bversions\b[^\n]{0,120}?\b(?:access|add)\b"
     r"|\bsecrets\b[^\n]{0,120}?\bcreate\b[^\n]*?--data-file"
-    r"|/versions/[^\s'\"]{0,200}:access\b|:addVersion\b"
+    r"|/versions/[^\s'\"]{0,200}(?::|%3A)access\b|(?::|%3A)addVersion\b"
+    r"|SecretManagerService/(?:Access|Add)SecretVersion\b"
 )
 MAX_STATES = 2000
 DEPTH = 4
-RELAXED = [False]  # set inside waxseal's and oh's own trees: no backstop there
+WRITTEN = set()  # files this command writes (`> f`, `tee f`, `cp`/`mv` targets), by name
 TIME_LIMIT = 5  # seconds; the hook's own timeout is 10, and a killed guard lets the command run
 
 KUBESEAL = "runs kubeseal"
@@ -115,6 +122,7 @@ GCLOUD = "changes or reads Secret Manager with gcloud"
 API = "calls the Secret Manager API directly"
 UNSURE = "mentions Secret Manager in a form the guard can't read for certain"
 NAMED = "names a Secret Manager value read or write"
+UNWRITTEN = "runs gcloud with a command group that isn't written out"
 
 
 ANSI_STRING = re.compile(r"\$'((?:[^'\\]|\\.)*)'")
@@ -178,20 +186,20 @@ def gcloud_readings(args):
     return [list(state) for state in results]
 
 
-def gcloud_reason(args, mentioned):
+def gcloud_reason(args, mentioned, fed=False):
+    """fed: gcloud runs under xargs or parallel, which add words from stdin or a file."""
     readings = gcloud_readings(args)
     if readings is None:
-        return UNSURE if mentioned else None
+        return UNWRITTEN
     for words in readings:
         if not words:
-            # Bare gcloud: its command words may come from stdin (`… | xargs gcloud`).
-            if mentioned:
-                return UNSURE
+            # Bare gcloud: under xargs or parallel its command words come from stdin or a file.
+            if fed:
+                return UNWRITTEN
             continue
         if words[0][1]:
-            if mentioned:
-                return UNSURE
-            continue
+            return UNWRITTEN  # `gcloud $(cat args)`, `gcloud ${x#/} versions …` (board item 383)
+
         if words[0][0] != "secrets":
             continue
         texts = [text for text, _ in words[1:3]]
@@ -303,6 +311,7 @@ def placeholders(argv):
 
 def argv_reason(argv, cwd, depth, mentioned, nested=True):
     argv = placeholders(argv)
+    fed = any(os.path.basename(w) in ("xargs", "parallel") for w in argv)
     string = split_string(argv)
     if string is not None:
         return reason_for(string, cwd, depth + 1, mentioned)
@@ -315,20 +324,28 @@ def argv_reason(argv, cwd, depth, mentioned, nested=True):
         return UNSURE  # `$g secrets …`, `$(echo gcloud) secrets …`, `{gcloud,} secrets …`
     if name in LOOKUPS and not (name == "hash" and "-p" in args):
         return None
+    if name == "gcloud":
+        why = gcloud_reason(args, mentioned, fed)
+        if why:
+            return why
     why = first_reason(argv, name, args, cwd, depth, mentioned)
     if why or not nested:
         return why
     # A program run by another one: `find -exec gcloud …`, `parallel gcloud …`, `setsid bash -c …`.
+    runner = os.path.basename(argv[0]) in RUNS_LATER
     for j in range(1, len(argv)):
         if os.path.basename(argv[j]) in NESTED and not isinstance(argv[j], Expanded):
             why = argv_reason(argv[j:], cwd, depth + 1, mentioned, nested=False)
-            if why:
+            if why and (runner or why not in (UNSURE, UNWRITTEN)):
                 return why
     return None
 
 
 def script_reason(script, cwd, depth, mentioned):
-    """A file a shell is told to run, whatever its name; one it can't read counts as unsure."""
+    """A file a shell is told to run, whatever its name; one it can't read, or one this
+    same command writes first (so what's on disk now isn't what runs), counts as unsure."""
+    if str(script) in WRITTEN or os.path.basename(str(script)) in WRITTEN:
+        return UNSURE if mentioned else None
     path, text = shell.read_script(script, cwd)
     if text is None:
         return UNSURE if mentioned and str(script) != "/dev/null" else None
@@ -363,6 +380,11 @@ def first_reason(argv, name, args, cwd, depth, mentioned):
             return reason_for(string, cwd, depth + 1, mentioned)
     if "/" in argv[0]:
         path, text = shell_script(argv[0], cwd)
+        if not text:
+            # An executable text file with no #! line runs as a shell script too.
+            path, text = shell.read_script(argv[0], cwd)
+            if text is not None and (text.startswith("#!") or "\0" in text[:1024] or not os.access(path, os.X_OK)):
+                text = None
         if text:
             return reason_for(text, str(path.parent), depth + 1, mentioned)
     if name == "eval":
@@ -385,8 +407,6 @@ def first_reason(argv, name, args, cwd, depth, mentioned):
         if name != "kubectl" and any(KUBESEAL_ARG.search(arg) for arg in args):
             return KUBESEAL
         return argv_reason(args[args.index("--") + 1:], cwd, depth + 1, mentioned) if "--" in args else None
-    if name == "gcloud":
-        return gcloud_reason(args, mentioned)
     if name in NETWORK:
         return API if any(SECRET_API.search(arg) for arg in args) else None
     return None
@@ -412,12 +432,46 @@ def heredoc_reason(header, start, end, body, cwd, depth, mentioned):
     return None
 
 
+def files_as_code(stages, substs, cwd, depth, mentioned):
+    """Files bash reads as commands: `bash < f`, `cat f | bash`, and `$(< f)` or
+    `$(cat f)` (whose text a `bash -c` or `eval` may run)."""
+    files = []
+    for k, (argv, redirects, end) in enumerate(stages):
+        run = unwrap(argv)
+        if run and os.path.basename(run[0]) in SHELLS:
+            files += [t for op, t in redirects if op in ("<", "<>") and t != shell.HEREDOC_PLACEHOLDER]
+        nxt = stages[k + 1][0] if end == "|" and k + 1 < len(stages) else None
+        if run and os.path.basename(run[0]) == "cat" and nxt and unwrap(nxt) and os.path.basename(unwrap(nxt)[0]) in SHELLS:
+            files += [a for a in run[1:] if not a.startswith("-")]
+    for inner in substs:
+        match = re.fullmatch(r"\s*(?:<|cat\s+)\s*(\S+)\s*", inner)
+        if match:
+            files.append(match.group(1))
+    for name in files:
+        if name in WRITTEN or os.path.basename(name) in WRITTEN:
+            if mentioned:
+                return UNSURE
+            continue
+        path, text = shell.read_script(name, cwd)
+        if text is None:
+            if mentioned:
+                return UNSURE
+            continue
+        why = reason_for(text, str(path.parent), depth + 1, mentioned)
+        if why:
+            return why
+    return None
+
+
 def stdin_shell(stages):
     """True when a shell reads its commands from stdin that isn't a heredoc:
-    `… | bash`, `bash -s`, `bash <<< '…'`, `bash < file`."""
+    `… | bash`, `bash -s`, `bash <<< '…'`, `bash < file`, and `… | parallel`
+    with no command of its own."""
     previous = None
     for argv, redirects, end in stages:
         run = unwrap(argv)
+        if run and os.path.basename(run[0]) == "parallel" and not any(not a.startswith("-") for a in run[1:]):
+            return True
         if run and os.path.basename(run[0]) in SHELLS and shell_command(run[1:]) == (None, None) or (
             run and os.path.basename(run[0]) in SHELLS and "-s" in run[1:]
         ):
@@ -437,11 +491,20 @@ def reason_for(text, cwd, depth=0, mentioned=False):
         return None
     if depth > DEPTH or len(text) > MAX_TEXT:
         return UNSURE if mentioned or mentions(text) else None
-    main, docs, placed = place_heredocs(text)
-    if (BACKSTOP.search(main) or BACKSTOP.search(plain(main))) and not RELAXED[0]:
+    # The whole text, heredoc bodies included: whichever program ends up reading a body,
+    # a value read or write spelled out anywhere in it is refused (board item 383).
+    if BACKSTOP.search(text) or BACKSTOP.search(plain(text)):
         return NAMED
+    main, docs, placed = place_heredocs(text)
     commands, substs, lexed = exact_commands(main)
     stages = exact_pipes(main)[0]
+    for argv, redirects, _ in stages:
+        WRITTEN.update(t for op, t in redirects if ">" in op)
+        run = unwrap(argv)
+        if run and os.path.basename(run[0]) in ("tee", "cp", "mv", "install", "ln", "dd"):
+            operands = [a for a in run[1:] if not a.startswith("-")]
+            WRITTEN.update(a.split("=", 1)[1] if a.startswith("of=") else a for a in operands)
+    WRITTEN.update(os.path.basename(w) for w in list(WRITTEN))
     # Read for certain, the words say what bash sees (comments and data heredocs aren't words);
     # otherwise the raw text is all there is.
     mentioned = mentioned or (
@@ -481,6 +544,9 @@ def reason_for(text, cwd, depth=0, mentioned=False):
         why = argv_reason(argv, cwd, depth, mentioned)
         if why:
             return why
+    why = files_as_code(stages, substs, cwd, depth, mentioned)
+    if why:
+        return why
     if mentioned and stdin_shell(stages):
         return UNSURE
     return None
@@ -506,12 +572,11 @@ def decide(event):
     cwd = event.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         cwd = os.getcwd()
-    RELAXED[0] = exempt(cwd)
+    WRITTEN.clear()
     why = reason_for(command_text(event.get("tool_input")), cwd)
-    # In waxseal's and oh's own trees, whose code and tests name these on purpose, only a
-    # command that plainly runs gcloud secrets or calls the API is refused. Anyone can make
-    # such a tree, so the exemption never covers those.
-    if not why or (why in (KUBESEAL, UNSURE) and RELAXED[0]):
+    # Only kubeseal is exempt in waxseal's and oh's own trees: anyone can make such a tree,
+    # so the Secret Manager checks apply everywhere (board item 383).
+    if not why or (why == KUBESEAL and exempt(cwd)):
         return None
     return message_for(why)
 
@@ -525,6 +590,8 @@ def message_for(why):
         "(`gcloud secrets list|describe`, `gcloud secrets versions list|describe`), and so is editing "
         "an ExternalSecret manifest. If you need a value set or changed, ask the user; don't work around this."
     )
+    if why == UNWRITTEN:
+        message += " Write gcloud's command group out literally (`gcloud compute …`)."
     if why == NAMED:
         message += " If you're only writing about it (a commit message, a PR comment), put the text in a file or a quoted heredoc (`<<'EOF'`)."
     if why == UNSURE:

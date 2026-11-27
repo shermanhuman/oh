@@ -127,6 +127,10 @@ HOLES = [
     ("{ inside ${…}", ": ${x/{/}; g=gcloud; $g sec$'r'ets versions destroy 3 --secret=x", True),
     ("\\U escape spells the group", "g=gcloud; $g $'\\U00000073'ecrets versions destroy 3 --secret=x", True),
     ("source /dev/stdin", f"source /dev/stdin <<< 'gcloud {ACCESS}'", True),
+    ("group word from a file", "gcloud $(cat args.txt)", False),
+    ("group word from stdin via xargs", "xargs -a args.txt gcloud", False),
+    ("group word from a parameter operator", "a=destroy; x=/secrets; gcloud ${x#/} versions $a 3 --secret=x", True),
+    ("lines piped into parallel", f"echo 'gcloud {ACCESS}' | parallel", False),
     ("trap string", "s=secrets; trap \"gcloud $s versions destroy 3 --secret=x\" EXIT", True),
 ]
 
@@ -138,8 +142,15 @@ UNSURE_DENIED = [
     "cat <<EOF\ngcloud secrets list",
 ]
 
-# Refused because the text the shell runs names a value read or write, however the rest reads.
+# Refused because the text names a value read or write, heredoc bodies included, however the
+# rest reads (board item 383): prose that quotes the command goes through a file and --body-file.
 NAMED_DENIED = [
+    "cat > docs/secrets.md <<'EOF'\n# Don't\n\ngcloud secrets versions access latest --secret foo\nEOF",
+    "git commit -m \"$(cat <<'EOF'\nguard: gcloud secrets versions access is refused\nEOF\n)\"",
+    "gh pr create --title \"secrets guard fixes\" --body \"$(cat <<'EOF'\n## gcloud secrets versions access\nnow refused (it's a hole)\nEOF\n)\"",
+    "setsid bash <<'EOF'\ngcloud secrets versions access latest --secret=x\nEOF",
+    "cat > run <<'EOF'\ngcloud secrets versions access latest --secret=x\nEOF\nbash run",
+    "python3 - <<EOF\nimport subprocess; subprocess.run(['gcloud', 'secrets', 'versions', 'access', 'latest'])\nEOF",
     "rg 'secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:access' docs/",
     "python3 -c \"import subprocess; subprocess.run(['gcloud','secrets','versions','access','latest'])\"",
     "trap 'gcloud secrets versions access latest --secret=x' EXIT",
@@ -195,7 +206,6 @@ ALLOWED = [
     "gh pr create --title x --body \"$(cat <<'EOF'\n## Changes\n- kubeseal removed\nEOF\n)\"",
     "gh pr comment 15 --body 'Fixed: `kubeseal` wrappers are denied now'",
     "gh pr create --title 'no kubeseal' --body-file body.md",
-    "cat > docs/secrets.md <<'EOF'\n# Don't\n\ngcloud secrets versions access latest --secret foo\nEOF",
     "bash <<'EOF'\n# old: kubectl ... | kubeseal > x\necho ok\nEOF",
     "ssh root@vm 'bash -s prep' < local-e2e/kata-rehearsal/18-components.sh",
     "scp local-e2e/kata-rehearsal/18-components.sh root@vm:/root/",
@@ -203,8 +213,6 @@ ALLOWED = [
     "go test ./... -run TestSeal -count=1",
     "python3 -m pytest tests/ -k secret",
     "node -e 'console.log(1 << 3)'",
-    "git commit -m \"$(cat <<'EOF'\nguard: gcloud secrets versions access is refused\nEOF\n)\"",
-    "gh pr create --title \"secrets guard fixes\" --body \"$(cat <<'EOF'\n## gcloud secrets versions access\nnow refused (it's a hole)\nEOF\n)\"",
     "kubectl get secrets -n $ns",
     "$EDITOR secrets.yaml",
     "cat .claude/rules/secrets.md",
@@ -228,6 +236,13 @@ ALLOWED = [
     "kubectl get secret default-twenty-secrets -o name; D=~/x/secrets; ls $D",
     "cat > check.sh <<'EOF'\n# never prints secrets\n$CHECK --all\nEOF",
     "case $n in breakdown-*) echo web;; *) echo other;; esac; gcloud secrets list",
+    "git commit -m \"$(cat <<'EOF'\nguard: refuse Secret Manager value reads (secrets stay in GSM)\nEOF\n)\"",
+    "gh pr create --title \"secrets guard fixes\" --body \"$(cat <<'EOF'\n## gcloud secrets list still works\nit's fine :)\nEOF\n)\"",
+    "gh pr comment 61 --body-file notes.md",
+    "gcloud --version",
+    "gcloud compute instances list --format json",
+    "echo hi > out.txt; cat out.txt; gcloud secrets list",
+    'grep -n -e "#171" -e "gcloud" $S/pr193-body.md | head -30',
 ]
 
 # Outside the guard's scope by design (the rule still forbids them): interpreter code.
@@ -336,6 +351,16 @@ class Guard(unittest.TestCase):
             for command in ["bash plain", "source plain", ". ./plain", "sh -e plain"]:
                 with self.subTest(command=command):
                     self.assertIsNotNone(run(command, cwd=d))
+            # Files a shell reads as commands are read too, and one this command writes first is unsure.
+            (root / "args.sh").write_text("gcloud secrets versions destroy 3 --secret=x\n")
+            (root / "noshebang").write_text("gcloud secrets versions destroy 3 --secret=x\n")
+            (root / "noshebang").chmod(0o755)
+            (root / "ok.sh").write_text("echo ok\n")
+            for command in ["bash < args.sh", "cat args.sh | bash", "./noshebang", 'bash -c "$(< args.sh)"', 'eval "$(cat args.sh)"',
+                            "printf '%s\\n' 'gcloud secrets versions destroy 3 --secret=x' > ok.sh; bash ok.sh"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
+            self.assertIsNone(run("bash ok.sh", cwd=d))
             # A script that can't be read, in a command that mentions Secret Manager, is refused.
             self.assertIsNotNone(run("bash missing.sh; gcloud secrets list", cwd=d))
             self.assertIsNone(run("bash missing.sh", cwd=d))
@@ -399,7 +424,9 @@ class Guard(unittest.TestCase):
             # Anyone can make such a tree, so a plain Secret Manager command is still refused there.
             self.assertIsNotNone(run("gcloud secrets versions destroy 3 --secret x", cwd=d))
             self.assertIsNotNone(run("curl https://secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:access", cwd=d))
-            self.assertIsNone(run("grep -rn 'gcloud secrets versions access' tests/", cwd=d))
+            # Only kubeseal is exempt there (board item 383).
+            self.assertIsNotNone(run("grep -rn 'gcloud secrets versions access' tests/", cwd=d))
+            self.assertIsNotNone(run("g=gcloud; $g secrets versions destroy 3 --secret=x", cwd=d))
 
 
 if __name__ == "__main__":
