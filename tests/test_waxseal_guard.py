@@ -421,21 +421,34 @@ class Guard(unittest.TestCase):
             (root / "tools" / "a.sh").write_text("bash tools/b.sh\n")
             (root / "tools" / "b.sh").write_text("gcloud secrets versions destroy 3 --secret=x\n")
             self.assertIsNotNone(run("bash tools/a.sh", cwd=d))
+            # And from its own directory, for a script that does `cd "$(dirname "$0")"` (round 9's M43,
+            # round 7's M38): two services with identical deploy scripts, only one fetching a value.
+            for svc in ("a", "b"):
+                (root / "services" / svc).mkdir(parents=True)
+                (root / "services" / svc / "deploy.sh").write_text('cd "$(dirname "$0")" && bash ./fetch.sh\n')
+                (root / "services" / svc / "fetch.sh").write_text("echo ok\n" if svc == "a" else "gcloud secrets versions destroy 3 --secret=x\n")
+            for command in ["bash services/a/deploy.sh && bash services/b/deploy.sh", "sh services/b/deploy.sh"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
+            (root / "lib").mkdir()
+            (root / "lib" / "run.sh").write_text('cd "$(dirname "${BASH_SOURCE[0]}")"\n. ./env.sh\n')
+            (root / "lib" / "env.sh").write_text("gcloud secrets versions destroy 3 --secret=x\n")
+            (root / "lib" / "run.sh").chmod(0o755)
+            for command in ["source lib/run.sh", "./lib/run.sh"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
             (root / "rc").write_text("eval \"$(mise activate bash)\"\nalias ll='ls -l'\n")
             self.assertIsNone(run("source ./rc; kubectl get secrets -n app", cwd=d))
             self.assertIsNone(run("cd sub && bash ok.sh && kubectl get secrets -n app", cwd=d))
             self.assertIsNone(run("bash < ok.sh; kubectl get secrets -n app", cwd=d))
-            # A script that can't be read, in a command that mentions Secret Manager, is refused.
-            self.assertIsNotNone(run("bash missing.sh; gcloud secrets list", cwd=d))
-            self.assertIsNone(run("bash missing.sh", cwd=d))
             for command in ["bash ok.sh", "bash comment.sh", "python3 read.py", "cat seal.sh"]:
                 with self.subTest(command=command):
                     self.assertIsNone(run(command, cwd=d))
 
     def test_script_following_gaps(self):
-        """Board item 396 (owner, 2026-11-27): the guard doesn't follow a `cd`, a variable path or
-        `echo` output into a script. These pass when the command itself doesn't mention Secret
-        Manager; the rule still forbids them."""
+        """Board item 396 (owner, 2026-11-27): a script the guard can't find at its literal path
+        (after a `cd`, through a variable or loop path, or made by `cp`) is a known gap, and passes
+        even when the command mentions Secret Manager. The rule still forbids these."""
         with tempfile.TemporaryDirectory() as d:
             root = pathlib.Path(d)
             (root / "svc").mkdir()
@@ -447,17 +460,26 @@ class Guard(unittest.TestCase):
                             "echo 'export PATH=$HOME/bin:$PATH' >> rc && source rc && ls secrets"]:
                 with self.subTest(command=command):
                     self.assertIsNone(run(command, cwd=d))
-            # After a `cd`, a script the guard can't find is one it doesn't follow, not an unsure one,
-            # so everyday commands that only mention secrets still pass.
-            for command in ["cd svc && ./build.sh && kubectl get secrets -n app", "cd svc && bash get.sh; gcloud secrets list"]:
+            for command in ["cd svc && ./build.sh && kubectl get secrets -n app", "cd svc && bash get.sh; gcloud secrets list",
+                            "bash missing.sh; gcloud secrets list", "cp svc/get.sh run.sh && bash run.sh && gcloud secrets list",
+                            "env -C svc bash get.sh; gcloud secrets list"]:
                 with self.subTest(command=command):
                     self.assertIsNone(run(command, cwd=d))
-            # Without one, a script that isn't there yet, or that other output is written into, is unsure
-            # when the command mentions Secret Manager.
+            # A script that output from a command mentioning Secret Manager went into is unsure.
             for command in ["echo 'gcloud secrets versions destroy 3 --secret=x' > r.sh && ./r.sh",
                             "cat > r.sh <<'EOF'\n#!/bin/sh\nEOF\necho 'gcloud secrets versions destroy 3 --secret=x' >> r.sh; bash r.sh"]:
                 with self.subTest(command=command):
                     self.assertIsNotNone(run(command, cwd=d))
+
+    def test_url_cut_needs_a_mention(self):
+        """Round 9's M44: a long curl loop that never mentions Secret Manager isn't unsure."""
+        outer = " ".join(f"a{i}" for i in range(9))
+        inner = " ".join(f"b{i}" for i in range(9))
+        command = f'for a in {outer}; do\n  for b in {inner}; do\n    curl -s "https://example.com/$a/$b"\n  done\ndone'
+        self.assertIsNone(run(command))
+        hosts = " ".join(f"h{i}" for i in range(9))
+        paths = " ".join(f"p{i}" for i in range(8))
+        self.assertIsNone(run(f'for h in {hosts}; do for p in {paths}; do curl -sf "http://$h.internal/$p"; done; done'))
 
     def test_fast_on_large_input(self):
         commands = [

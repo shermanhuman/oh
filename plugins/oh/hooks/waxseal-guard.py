@@ -11,9 +11,10 @@ get past it. It looks only at what a shell would execute. It refuses:
   versions list|describe and locations, run directly, through a wrapper (sudo,
   env, xargs, mise exec, coproc, find -exec, ...), inside `bash -c`, `su -c`,
   `ssh`, `eval`, `watch`, `env -S` or `trap` strings, a heredoc fed to a shell,
-  a script named plainly (`bash x.sh`, `source x.sh`, `./x.sh`, `bash < x.sh`,
-  read against the event's directory), a heredoc this command writes and then
-  runs by the same spelling, or a command substitution;
+  a script named by its literal path from the event's directory (`bash x.sh`,
+  `source x.sh`, `./x.sh`, `bash < x.sh`; its commands read from that directory
+  and from its own), a heredoc this command writes and then runs by the same
+  spelling, or a command substitution;
 - a Secret Manager URL (global, regional or `.mtls` host) handed to
   curl/wget/http/xh, directly or through a variable set in the same command;
 - `kubeseal` (Sealed Secrets is retired), the same ways.
@@ -23,15 +24,17 @@ operators, fd numbers, CR, quoting, `$'…'`, arithmetic and heredocs can't hide
 a command by accident. Where it still can't be sure (the text doesn't lex, a
 heredoc doesn't end the way bash would end it, the text is too long or nested
 too deep, the program or gcloud's command group is a variable or expansion, a
-shell reads commands from stdin, an alias is defined, a script can't be read,
-or the guard itself fails or runs past its 5 s deadline), it refuses the text
+shell reads commands from stdin or a process substitution, an alias is defined, a script it runs was
+written by a command that mentions Secret Manager (`echo 'gcloud secrets …' >
+run.sh`), or the guard itself fails or runs past its 5 s deadline), it refuses the text
 if it mentions Secret Manager (`MENTION`) and lets it through otherwise.
 
 Not covered, by design: a command deliberately disguised to get past the guard
-(agents are trusted, board item 392); a script reached through a `cd`, a
-variable path, a loop or `echo`/`printf` output (board item 396: these are
-refused only when the command itself mentions Secret Manager); interpreter code (Python, Node, Go ...)
-using a Secret Manager client; a `PATH` shim, the user's aliases and functions,
+(agents are trusted, board item 392); a script the guard can't find at its
+literal path: one reached through a `cd`, a variable or loop path, or one the
+command makes some other way than a heredoc (`cp`, `curl -o`), even when the
+command mentions Secret Manager (board item 396); interpreter code (Python,
+Node, Go ...) using a Secret Manager client; a `PATH` shim, the user's aliases and functions,
 login profiles or `$BASH_ENV`; a persisted `gcloud config set core/log_http
 true`. Commit messages, PR bodies, grep patterns and documents written through
 heredocs are data and pass, even when they quote these commands.
@@ -107,10 +110,9 @@ DEPTH = 4
 # for a variable program and a URL, never for a script path), and every heredoc it writes to a
 # file, keyed by the target as spelled and as a literal path from the event's directory. A
 # script is read from each candidate, the disk included, and any that refuses refuses the command.
-# `moved`: the command changes directory, so a relative script may be one the guard doesn't
-# follow (item 396), and one it can't find isn't unsure. `redirected`: files some other output
-# (`echo … >> run.sh`) goes to, which the guard doesn't read; one of those run is unsure.
-STATE = {"vars": {}, "written": {}, "host": False, "moved": False, "redirected": set()}
+# `redirected`: files that output from a command mentioning Secret Manager goes to
+# (`echo 'gcloud secrets …' >> run.sh`), which the guard doesn't read; one of those run is unsure.
+STATE = {"vars": {}, "written": {}, "host": False, "redirected": set()}
 MAX_CANDIDATES = 64  # past this a variable's readings count as unsure
 
 
@@ -430,22 +432,26 @@ def write(target, body, cwd):
 
 def script_reason(script, cwd, depth, mentioned):
     """A file a shell is told to run, whatever its name: what this command wrote to it, and
-    what's on disk at its literal path. Its commands run in the caller's directory, so they're
-    read from there. A literal path with neither, or a file other output went into, is unsure."""
+    what's on disk at its literal path, read from the caller's directory (where its commands
+    run) and from its own (where a `cd "$(dirname "$0")"` takes them). A script the guard can't
+    find is a known gap (item 396); one that mention-bearing output went into is unsure."""
     if str(script) == "/dev/null":
         return None
+    if re.match(r"[<>]\(|/dev/(stdin|fd/)|/proc/self/fd/", str(script)):
+        # `bash <(…)`, `source /dev/stdin <<< …`: the script is another command's output, as for a
+        # shell reading stdin; unsure under a mention.
+        return UNSURE if mentioned else None
     path = resolve(script, cwd)
     # A file is judged on what it says: the command's own mention doesn't make a `.bashrc` unsure.
-    readings = [body for key in keys(script, cwd) for body in STATE["written"].get(key, [])]
+    readings = [(cwd, body) for key in keys(script, cwd) for body in STATE["written"].get(key, [])]
     if path:
         _, text = shell.read_script(path, cwd)
         if text is not None:
-            readings.append(text)
-    # A path the guard doesn't follow (a variable, or after a `cd`) is a known gap, not unsure (item 396).
-    if mentioned and ((not readings and path and not STATE["moved"]) or any(k in STATE["redirected"] for k in keys(script, cwd))):
+            readings += [(cwd, text), (os.path.dirname(path), text)]
+    if mentioned and any(k in STATE["redirected"] for k in keys(script, cwd)):
         return UNSURE
-    for text in dict.fromkeys(readings):
-        why = reason_for(text, cwd, depth + 1)
+    for here, text in dict.fromkeys(readings):
+        why = reason_for(text, here, depth + 1)
         if why:
             return why
     return None
@@ -490,9 +496,10 @@ def first_reason(argv, name, args, cwd, depth, mentioned, fed=False):
             if text is not None and (text.startswith("#!") or "\0" in text[:1024] or not os.access(path, os.X_OK)):
                 text = None
         if text:
-            why = reason_for(text, cwd, depth + 1)
-            if why:
-                return why
+            for here in dict.fromkeys([cwd, str(path.parent)]):
+                why = reason_for(text, here, depth + 1)
+                if why:
+                    return why
     if name == "eval":
         return reason_for(" ".join(args), cwd, depth + 1, mentioned)
     if name == "trap":
@@ -519,10 +526,10 @@ def first_reason(argv, name, args, cwd, depth, mentioned, fed=False):
             return API
         # `curl ".../v1/$NAME:access"`, `for u in …; do curl "$u"`, `… | xargs curl`: the URL is
         # built at run time from something that names the Secret Manager host, or the readings
-        # were cut; unsure.
+        # were cut in a command that mentions Secret Manager; unsure.
         host_values = any(SECRET_HOST.search(v) for values in STATE["vars"].values() for v in values)
         built = any(isinstance(a, Expanded) and not a.startswith("-")
-                    and (SECRET_HOST.search(a) or host_values or cut)
+                    and (SECRET_HOST.search(a) or host_values or (cut and mentioned))
                     for a, (_, cut) in zip(args, readings))
         if built or (fed and STATE["host"]):
             return UNSURE
@@ -649,9 +656,6 @@ def reason_for(text, cwd, depth=0, mentioned=False):
                 STATE["vars"].setdefault(key, []).append(os.path.expanduser(value))
         if len(argv) > 2 and argv[0] == "for" and argv[2] == "in":  # `for u in A B; do curl "$u"`
             STATE["vars"].setdefault(str(argv[1]), []).extend(str(w) for w in argv[3:])
-        run = unwrap(argv)
-        if run and (run[0] in ("cd", "pushd", "popd") or (os.path.basename(run[0]) == "env" and any(a in ("-C", "--chdir") or a.startswith("--chdir=") for a in run[1:]))):
-            STATE["moved"] = True
     for argv, redirects, _ in stages:
         # Judged on what's written: `echo 'export …' >> ~/.bashrc; …; ls secrets` isn't unsure.
         if any(mentions(w) for w in argv) and not any(target == shell.HEREDOC_PLACEHOLDER for op, target in redirects):
@@ -738,7 +742,7 @@ def decide(event):
     if exempt(cwd):
         return None
     text = command_text(event.get("tool_input"))
-    STATE.update(vars={}, written={}, host=False, moved=False, redirected=set())
+    STATE.update(vars={}, written={}, host=False, redirected=set())
     why = reason_for(text, cwd)
     if not why:
         return None
