@@ -493,6 +493,7 @@ class Guard(unittest.TestCase):
                         f"MISE_CD={work} mise exec -- bash -c 'git push'", f"MISE_CD={work} mise x -c 'git push'",
                         f"export MISE_CD={work}; mise exec -- bash -c 'git push'",
                         f"env --chdir {work} git push", f"env --chdir={work} git push"], "deny")
+            self.check([f"cd {work} && env --unset FOO git push"], "deny")  # --unset takes its value
             git("switch", "-q", "-c", "feat/x", cwd=work)
             self.check(["git push", "git push origin HEAD", "git push -u origin feat/x"], None, cwd=str(work))
             self.check(["git push origin HEAD:trunk", "git push origin main"], "deny", cwd=str(work))
