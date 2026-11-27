@@ -11,7 +11,9 @@ get past it. It looks only at what a shell would execute. It refuses:
   versions list|describe and locations, run directly, through a wrapper (sudo,
   env, xargs, mise exec, coproc, find -exec, ...), inside `bash -c`, `su -c`,
   `ssh`, `eval`, `watch`, `env -S` or `trap` strings, a heredoc fed to a shell,
-  a script a shell or `source` runs, or a command substitution;
+  a script named plainly (`bash x.sh`, `source x.sh`, `./x.sh`, `bash < x.sh`,
+  read against the event's directory), a heredoc this command writes and then
+  runs by the same spelling, or a command substitution;
 - a Secret Manager URL (global, regional or `.mtls` host) handed to
   curl/wget/http/xh, directly or through a variable set in the same command;
 - `kubeseal` (Sealed Secrets is retired), the same ways.
@@ -26,7 +28,9 @@ or the guard itself fails or runs past its 5 s deadline), it refuses the text
 if it mentions Secret Manager (`MENTION`) and lets it through otherwise.
 
 Not covered, by design: a command deliberately disguised to get past the guard
-(agents are trusted, board item 392); interpreter code (Python, Node, Go ...)
+(agents are trusted, board item 392); a script reached through a `cd`, a
+variable path, a loop or `echo`/`printf` output (board item 396: these are
+refused only when the command itself mentions Secret Manager); interpreter code (Python, Node, Go ...)
 using a Secret Manager client; a `PATH` shim, the user's aliases and functions,
 login profiles or `$BASH_ENV`; a persisted `gcloud config set core/log_http
 true`. Commit messages, PR bodies, grep patterns and documents written through
@@ -99,12 +103,15 @@ SECRET_VERBS = {"access", "add", "create", "delete", "destroy", "disable", "enab
 GCLOUD_READS = (["list"], ["describe"], ["get-iam-policy"], ["versions", "list"], ["versions", "describe"], ["locations"])
 MAX_STATES = 2000
 DEPTH = 4
-# Per decision, what the command itself sets up: every literal value assigned to a name, every
-# `cd` target, and everything written to a file (by the path as spelled and as resolved). These
-# only ever add readings: a script is read from each candidate, the disk included, and any that
-# refuses refuses the command (round 5's step-back).
-STATE = {"vars": {}, "cwds": [], "written": {}, "host": False, "cut": False, "read": set()}
-MAX_CANDIDATES = 64  # past this a candidate list is cut, and a cut list counts as unsure (`STATE["cut"]`)
+# Per decision, what the command itself sets up: every literal value assigned to a name (read
+# for a variable program and a URL, never for a script path), and every heredoc it writes to a
+# file, keyed by the target as spelled and as a literal path from the event's directory. A
+# script is read from each candidate, the disk included, and any that refuses refuses the command.
+# `moved`: the command changes directory, so a relative script may be one the guard doesn't
+# follow (item 396), and one it can't find isn't unsure. `redirected`: files some other output
+# (`echo … >> run.sh`) goes to, which the guard doesn't read; one of those run is unsure.
+STATE = {"vars": {}, "written": {}, "host": False, "moved": False, "redirected": set()}
+MAX_CANDIDATES = 64  # past this a variable's readings count as unsure
 
 
 class Deadline(BaseException):
@@ -344,7 +351,7 @@ def argv_reason(argv, cwd, depth, mentioned, nested=True):
         return None
     name = os.path.basename(argv[0])
     args = argv[1:]
-    if isinstance(argv[0], Expanded) and any(k in STATE["written"] for k in [spelled(argv[0]), *resolve(argv[0], cwd)]):
+    if isinstance(argv[0], Expanded) and any(k in STATE["written"] for k in keys(argv[0], cwd)):
         return script_reason(argv[0], cwd, depth, mentioned)  # `f=$(mktemp); cat > "$f" <<EOF …; "$f"`
     known = re.fullmatch(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", str(argv[0])) if isinstance(argv[0], Expanded) else None
     values = STATE["vars"].get(known.group(1), []) if known else []
@@ -384,71 +391,61 @@ def spelled(word):
     return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}(?![A-Za-z0-9_])", r"$\1", str(word))
 
 
-def substitute(word):
-    """Every text a word may become from the literal values this command assigns (`STATE["cut"]`
-    is set when the list had to be cut)."""
-    texts = [str(word)]
+def expand(word):
+    """(every other text a URL word may become from the literal values this command assigns,
+    whether the list was cut)."""
+    texts, cut = [str(word)], False
     for _ in range(4):
         grown = []
         for text in texts:
             m = re.search(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?\}|\$([A-Za-z_][A-Za-z0-9_]*)", text)
             values = STATE["vars"].get(m.group(1) or m.group(2)) if m else None
             grown += [text[:m.start()] + v + text[m.end():] for v in values] if values else [text]
-        if len(grown) > MAX_CANDIDATES:
-            STATE["cut"] = True
-        texts = list(dict.fromkeys(grown))[:MAX_CANDIDATES]
-    return texts
+        grown = list(dict.fromkeys(grown))
+        cut = cut or len(grown) > MAX_CANDIDATES
+        texts = grown[:MAX_CANDIDATES]
+    return [t for t in texts if t != str(word)], cut
 
 
 def resolve(word, cwd):
-    """Every path a word may name: `~` expanded, each literal value this command assigns to a
-    variable in it, against the event's directory and each directory the command `cd`s into.
-    Empty when it holds an expansion the guard can't follow."""
-    paths = []
-    for text in substitute(word):
-        if "$" in text or "`" in text:
-            continue
-        path = pathlib.Path(os.path.expanduser(text))
-        for here in ([] if path.is_absolute() else [cwd, *STATE["cwds"]]) or [None]:
-            full = os.path.normpath(str(path if here is None else pathlib.Path(here) / path))
-            if full not in paths:
-                paths.append(full)
-    if len(paths) > MAX_CANDIDATES:
-        STATE["cut"] = True
-    return paths[:MAX_CANDIDATES]
+    """The literal path a word names from the event's directory (`~` expanded), or None when
+    it holds an expansion. The guard doesn't follow `cd`s or variables into a path (item 396)."""
+    text = str(word)
+    if "$" in text or "`" in text:
+        return None
+    return os.path.normpath(os.path.join(cwd, os.path.expanduser(text)))
 
 
-def expand(word):
-    """Every other text a word may become from the literal values this command assigns."""
-    return [t for t in substitute(word) if t != str(word)]
+def keys(word, cwd):
+    """What this command may have written a script under: its spelling and its literal path."""
+    path = resolve(word, cwd)
+    return [spelled(word)] + ([path] if path else [])
 
 
 def write(target, body, cwd):
-    """Remember what this command writes to target, by spelling and by every resolved path."""
-    for key in [spelled(target), *resolve(target, cwd)]:
+    """Remember a heredoc this command writes to target."""
+    for key in keys(target, cwd):
         STATE["written"].setdefault(key, []).append(body)
 
 
 def script_reason(script, cwd, depth, mentioned):
-    """A file a shell is told to run, whatever its name. Read from every candidate: what this
-    command wrote to it and what's on disk at each path it may name. With no candidate at all
-    (nothing written, nothing on disk, or a path the guard can't resolve) it's unsure."""
+    """A file a shell is told to run, whatever its name: what this command wrote to it, and
+    what's on disk at its literal path. Its commands run in the caller's directory, so they're
+    read from there. A literal path with neither, or a file other output went into, is unsure."""
     if str(script) == "/dev/null":
         return None
-    paths = resolve(script, cwd)
+    path = resolve(script, cwd)
     # A file is judged on what it says: the command's own mention doesn't make a `.bashrc` unsure.
-    readings = [(cwd, body) for key in [spelled(script), *paths] for body in STATE["written"].get(key, [])]
-    for path in paths:
+    readings = [body for key in keys(script, cwd) for body in STATE["written"].get(key, [])]
+    if path:
         _, text = shell.read_script(path, cwd)
         if text is not None:
-            readings.append((str(pathlib.Path(path).parent), text))
-    if (not readings or STATE["cut"]) and mentioned:
+            readings.append(text)
+    # A path the guard doesn't follow (a variable, or after a `cd`) is a known gap, not unsure (item 396).
+    if mentioned and ((not readings and path and not STATE["moved"]) or any(k in STATE["redirected"] for k in keys(script, cwd))):
         return UNSURE
-    for here, text in readings:
-        if (text, here) in STATE["read"]:
-            continue  # each reading once per decision; its directory is part of it
-        STATE["read"].add((text, here))
-        why = reason_for(text, here, depth + 1)
+    for text in dict.fromkeys(readings):
+        why = reason_for(text, cwd, depth + 1)
         if why:
             return why
     return None
@@ -480,20 +477,23 @@ def first_reason(argv, name, args, cwd, depth, mentioned, fed=False):
         string = string_runner(name, args)
         if string is not None:
             return reason_for(string, cwd, depth + 1, mentioned)
-    if any(k in STATE["written"] for k in [spelled(argv[0]), *resolve(argv[0], cwd)]):
+    if any(k in STATE["written"] for k in keys(argv[0], cwd)):
         return script_reason(argv[0], cwd, depth, mentioned)  # `cat > run <<EOF … EOF; ./run`, disk too
     if "/" in argv[0] and name not in NESTED | {"kubeseal"}:  # not gcloud's own wrapper script
-        for candidate in resolve(argv[0], cwd) or [str(argv[0])]:
-            path, text = shell_script(candidate, cwd)
-            if not text:
-                # An executable text file with no #! line runs as a shell script too.
-                path, text = shell.read_script(candidate, cwd)
-                if text is not None and (text.startswith("#!") or "\0" in text[:1024] or not os.access(path, os.X_OK)):
-                    text = None
-            if text:
-                why = reason_for(text, str(path.parent), depth + 1)
-                if why:
-                    return why
+        candidate = resolve(argv[0], cwd) or str(argv[0])
+        if mentioned and not isinstance(argv[0], Expanded) and (
+                (not os.path.lexists(candidate) and not STATE["moved"]) or any(k in STATE["redirected"] for k in keys(argv[0], cwd))):
+            return UNSURE  # `echo '…' > run.sh; ./run.sh`: a script the guard can't read
+        path, text = shell_script(candidate, cwd)
+        if not text:
+            # An executable text file with no #! line runs as a shell script too.
+            path, text = shell.read_script(candidate, cwd)
+            if text is not None and (text.startswith("#!") or "\0" in text[:1024] or not os.access(path, os.X_OK)):
+                text = None
+        if text:
+            why = reason_for(text, cwd, depth + 1)
+            if why:
+                return why
     if name == "eval":
         return reason_for(" ".join(args), cwd, depth + 1, mentioned)
     if name == "trap":
@@ -515,13 +515,16 @@ def first_reason(argv, name, args, cwd, depth, mentioned, fed=False):
             return KUBESEAL
         return argv_reason(args[args.index("--") + 1:], cwd, depth + 1, mentioned) if "--" in args else None
     if name in NETWORK:
-        if any(SECRET_API.search(text) for arg in args for text in [str(arg), *expand(arg)]):
+        readings = [expand(arg) for arg in args]
+        if any(SECRET_API.search(text) for arg, (texts, _) in zip(args, readings) for text in [str(arg), *texts]):
             return API
         # `curl ".../v1/$NAME:access"`, `for u in …; do curl "$u"`, `… | xargs curl`: the URL is
-        # built at run time; unsure when the command mentions Secret Manager.
-        # The URL is built at run time from something that names the Secret Manager host.
+        # built at run time from something that names the Secret Manager host, or the readings
+        # were cut; unsure.
         host_values = any(SECRET_HOST.search(v) for values in STATE["vars"].values() for v in values)
-        built = any(isinstance(a, Expanded) and not a.startswith("-") and (SECRET_HOST.search(a) or host_values) for a in args)
+        built = any(isinstance(a, Expanded) and not a.startswith("-")
+                    and (SECRET_HOST.search(a) or host_values or cut)
+                    for a, (_, cut) in zip(args, readings))
         if built or (fed and STATE["host"]):
             return UNSURE
         return None
@@ -638,41 +641,24 @@ def reason_for(text, cwd, depth=0, mentioned=False):
     )
     if mentioned and not (placed and lexed):
         return UNSURE
-    # Literal assignments and literal `cd`s, so a script path in this command resolves.
+    # Literal assignments, for a variable program or URL in this command.
     STATE["host"] = STATE["host"] or bool(SECRET_HOST.search(text))
     for argv in commands:
         for word in argv:
             if ASSIGNMENT.match(word):
                 key, value = word.split("=", 1)
                 STATE["vars"].setdefault(key, []).append(os.path.expanduser(value))
-        run = unwrap(argv)
-        if len(argv) > 2 and argv[0] == "for" and argv[2] == "in":  # `for u in A B; do …`
+        if len(argv) > 2 and argv[0] == "for" and argv[2] == "in":  # `for u in A B; do curl "$u"`
             STATE["vars"].setdefault(str(argv[1]), []).extend(str(w) for w in argv[3:])
-        target_word = None
-        if run and run[0] in ("cd", "pushd") and len(run) > 1:
-            target_word = run[1]
-        elif "env" in [os.path.basename(w) for w in argv]:
-            target_word = next((argv[k + 1] for k in range(len(argv) - 1) if argv[k] in ("-C", "--chdir")), None)
-        if target_word is not None and re.fullmatch(r"\$\(git rev-parse --show-toplevel[^)]*\)", str(target_word).strip('"')):
-            top = next((d for d in (pathlib.Path(cwd), *pathlib.Path(cwd).parents) if (d / ".git").exists()), None)
-            target_word = str(top) if top else None  # `cd "$(git rev-parse --show-toplevel)"`
-        if target_word is not None:
-            run = ["cd", target_word]
-        if run and run[0] == "cd" and len(run) > 1:
-            # Each `cd` from where the walk so far stands (bash's order); the event's directory and
-            # every earlier stop stay candidates too, for a `cd` inside `( … )` or a function.
-            base = STATE["cwds"][-1] if STATE["cwds"] else cwd
-            saved, STATE["cwds"] = STATE["cwds"], []
-            targets = resolve(run[1], base)
-            STATE["cwds"] = saved
-            # Plus every existing directory the target reaches from any candidate, for every value:
-            # a `cd` into a missing directory fails, so filtering by what exists drops no reading.
-            targets = targets[:1] + [t for t in resolve(run[1], cwd) if os.path.isdir(t)]
-            for target in targets:
-                if target not in STATE["cwds"]:
-                    STATE["cwds"].append(target)
-            if len(STATE["cwds"]) > MAX_CANDIDATES:
-                STATE["cut"], STATE["cwds"] = True, STATE["cwds"][-MAX_CANDIDATES:]
+        run = unwrap(argv)
+        if run and (run[0] in ("cd", "pushd", "popd") or (os.path.basename(run[0]) == "env" and any(a in ("-C", "--chdir") or a.startswith("--chdir=") for a in run[1:]))):
+            STATE["moved"] = True
+    for argv, redirects, _ in stages:
+        # Judged on what's written: `echo 'export …' >> ~/.bashrc; …; ls secrets` isn't unsure.
+        if any(mentions(w) for w in argv) and not any(target == shell.HEREDOC_PLACEHOLDER for op, target in redirects):
+            for op, target in redirects:
+                if ">" in op and not op.startswith(">&") and target != "/dev/null":
+                    STATE["redirected"].update(keys(target, cwd))
     for header, start, end, body, quoted in docs:
         why = heredoc_reason(header, start, end, body, cwd, depth, mentioned)
         if why:
@@ -699,18 +685,6 @@ def reason_for(text, cwd, depth=0, mentioned=False):
         if names and argv and os.path.basename(argv[0]) in NETWORK:
             if any(f"${n}" in arg or f"${{{n}}}" in arg for n in names for arg in argv[1:]):
                 return API
-    for argv, redirects, _ in stages:
-        run = unwrap(argv)
-        if run and os.path.basename(run[0]) in ("echo", "printf"):
-            # `echo '…' > run.sh; bash run.sh`: what it writes is what a later shell runs.
-            args = [str(a) for a in run[1:] if not (os.path.basename(run[0]) == "echo" and a in ("-e", "-n", "-E"))]
-            readings = {" ".join(args), shell.ansi_c(" ".join(args))}
-            if os.path.basename(run[0]) == "printf" and args:
-                readings |= {"\n".join(args[1:]), shell.ansi_c(args[0]), shell.ansi_c(args[0]) + "\n" + "\n".join(args[1:])}
-            for op, target in redirects:
-                if ">" in op:
-                    for body in readings:
-                        write(target, body, cwd)
     for argv in commands:
         why = argv_reason(argv, cwd, depth, mentioned)
         if why:
@@ -765,7 +739,7 @@ def decide(event):
     if exempt(cwd):
         return None
     text = command_text(event.get("tool_input"))
-    STATE.update(vars={}, cwds=[], written={}, host=False, cut=False, read=set())
+    STATE.update(vars={}, written={}, host=False, moved=False, redirected=set())
     why = reason_for(text, cwd)
     if not why:
         return None
@@ -782,7 +756,7 @@ def message_for(why):
         "an ExternalSecret manifest. If you need a value set or changed, ask the user; don't work around this."
     )
     if why == UNSURE:
-        message += " If this command doesn't touch a secret value, write it more plainly (no variable or substitution as the program, no unclosed quotes, heredocs that end on their own line) and run it again."
+        message += " If this command doesn't touch a secret value, write it more plainly (no variable or substitution as the program, no unclosed quotes, heredocs that end on their own line, a script that exists before the command runs) and run it again."
     return message
 
 
