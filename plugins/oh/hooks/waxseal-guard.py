@@ -481,9 +481,8 @@ def first_reason(argv, name, args, cwd, depth, mentioned, fed=False):
         return script_reason(argv[0], cwd, depth, mentioned)  # `cat > run <<EOF … EOF; ./run`, disk too
     if "/" in argv[0] and name not in NESTED | {"kubeseal"}:  # not gcloud's own wrapper script
         candidate = resolve(argv[0], cwd) or str(argv[0])
-        if mentioned and not isinstance(argv[0], Expanded) and (
-                (not os.path.lexists(candidate) and not STATE["moved"]) or any(k in STATE["redirected"] for k in keys(argv[0], cwd))):
-            return UNSURE  # `echo '…' > run.sh; ./run.sh`: a script the guard can't read
+        if mentioned and any(k in STATE["redirected"] for k in keys(argv[0], cwd)):
+            return UNSURE  # `echo '…' > run.sh; ./run.sh`: a script other output went into
         path, text = shell_script(candidate, cwd)
         if not text:
             # An executable text file with no #! line runs as a shell script too.
@@ -756,7 +755,7 @@ def message_for(why):
         "an ExternalSecret manifest. If you need a value set or changed, ask the user; don't work around this."
     )
     if why == UNSURE:
-        message += " If this command doesn't touch a secret value, write it more plainly (no variable or substitution as the program, no unclosed quotes, heredocs that end on their own line, a script that exists before the command runs) and run it again."
+        message += " If this command doesn't touch a secret value, write it more plainly (no variable or substitution as the program, no unclosed quotes, heredocs that end on their own line, a script that exists before the command runs rather than one it writes with echo) and run it again."
     return message
 
 
