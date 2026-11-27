@@ -353,13 +353,14 @@ def lex_exact(text, marks=None):
             end_word(i)
             i += 1
         elif c == "\\":
-            begin(i)
             if text[i + 1:i + 2] == "\n":
-                i += 2
+                i += 2  # a line continuation joins words; it starts none
             elif i + 1 < n:
+                begin(i)
                 word.append(text[i + 1])
                 i += 2
             else:
+                begin(i)
                 word.append("\\")
                 i += 1
         elif c == "'":

@@ -131,6 +131,28 @@ HOLES = [
     ("lines piped into parallel", f"echo 'gcloud {ACCESS}' | parallel", False),
     ("find start path as the group", "mkdir -p secrets; find secrets -maxdepth 0 -exec gcloud {} versions destroy 3 --secret=x \\;", True),
     ("parallel placeholder", "parallel gcloud {} versions destroy 3 --secret=x ::: secrets", False),
+    ("line continuation before the group", f"gcloud \\\n  {ACCESS}", True),
+    ("line continuation after a flag", f"gcloud --project=p \\\n  {ACCESS}", True),
+    ("line continuation before a -c string", f"bash -c \\\n  'gcloud {ACCESS}'", True),
+    ("line continuation in a substitution", f"V=$(gcloud \\\n  {ACCESS})", True),
+    ("line continuation before a variable's group", f"g=gcloud; $g \\\n  {ACCESS}", True),
+    ("heredoc to setsid bash", f"setsid bash <<'EOF'\ngcloud {ACCESS}\nEOF", True),
+    ("heredoc under kubectl exec", f"kubectl exec -i pod -- bash <<'EOF'\ngcloud {ACCESS}\nEOF", False),
+    ("heredoc under docker exec", f"docker exec -i c bash <<'EOF'\ngcloud {ACCESS}\nEOF", False),
+    ("heredoc as a -c string", f"bash -c \"$(cat <<'EOF'\ngcloud {ACCESS}\nEOF\n)\"", True),
+    ("heredoc as an eval string", f"eval \"$(cat <<'EOF'\ngcloud {ACCESS}\nEOF\n)\"", True),
+    ("heredoc written, then run with flags", f"cat > run <<'EOF'\ngcloud {ACCESS}\nEOF\nbash -x run", True),
+    ("heredoc written to a variable path, then run", f"f=run.tmp; cat > \"$f\" <<'EOF'\ngcloud {ACCESS}\nEOF\nbash \"$f\"", True),
+    ("heredoc written with tee, then run", f"tee run <<'EOF' >/dev/null\ngcloud {ACCESS}\nEOF\nbash run", True),
+    ("echo written, then run", f"echo 'gcloud {ACCESS}' > run.sh && chmod +x run.sh && ./run.sh", True),
+    ("docker exec -c with a variable", "docker exec c bash -c \"gcloud secrets versions destroy 3 --secret=$S\"", False),
+    ("variable holding the program and group", 'GS="gcloud secrets"; $GS versions destroy 3 --secret=x', True),
+    ("variable path to gcloud", f"G={{BIN}}/gcloud; $G {ACCESS}", True),
+    ("function keyword", f"g=gcloud; function get {{ $g {ACCESS}; }}; get", True),
+    ("env -u before -S", f"env -u X -S 'gcloud {ACCESS}'", True),
+    ("URL from a variable", 'NAME=projects/p/secrets/s/versions/1; curl -s "https://secretmanager.googleapis.com/v1/$NAME:access"', False),
+    ("URL fed to xargs curl", "echo https://secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:access | xargs curl -s", False),
+    ("here-string to bash -s after a stdin redirect", f"</dev/null bash -s <<< 'gcloud {ACCESS}'", True),
     ("trap string", "s=secrets; trap \"gcloud $s versions destroy 3 --secret=x\" EXIT", True),
 ]
 
@@ -238,6 +260,16 @@ ALLOWED = [
     "V=/opt/venv/bin/python; $V - <<'EOF'\nprint('secrets listed')\nEOF",
     'git commit -m "$(cat msg.txt)"; gcloud secrets list',
     "$PY -m unittest discover -s tests -k secrets",
+    "gcloud secrets \\\n  versions list foo",
+    "gcloud secrets \\\n  describe foo",
+    "cat > notes.md <<'EOF'\nRun gcloud secrets list in the console, then check secrets\nEOF\ngrep -c . notes.md",
+    'bash -c "kubectl --context $CTX get secrets -n $NS"',
+    "grep -rl x secrets | xargs -I{} sh -c 'echo \"== {}\"; cat {}'",
+    "grep -rn gcloud secrets docs",
+    "rg -l gcloud secrets docs | head",
+    "retry() { \"$@\" || \"$@\"; }; retry kubectl get secrets -n app",
+    "G=/usr/lib/google-cloud-sdk/bin/gcloud; $G secrets versions list x",
+    "gcloud secrets versions access --help",
     "cp a.txt b.txt && $PY $S/check.py --secrets-only",
     "sed -i 's/a/b/' x.py && $V/bin/python -m unittest discover -s tests -k secrets",
     "$V - <<'EOF'\nfiles = [f for f in x if f'{f}' != 'secrets']\nprint({'a': 1})\nEOF",
@@ -247,7 +279,6 @@ ALLOWED = [
 # Outside the guard's scope by design (the rule still forbids them): interpreter code, and
 # commands deliberately disguised to get past the guard (agents are trusted, board item 392).
 NOT_COVERED = [
-    "setsid bash <<'EOF'\ngcloud secrets versions access latest --secret=x\nEOF",
     "python3 - <<EOF\nimport subprocess; subprocess.run(['gcloud', 'secrets', 'versions', 'access', 'latest'])\nEOF",
     "python3 -c \"import subprocess; subprocess.run(['gcloud','secrets','versions','access','latest'])\"",
     "mapfile -C 'gcloud secrets versions access latest --secret=x #' -c 1 < /etc/hostname",
@@ -359,10 +390,16 @@ class Guard(unittest.TestCase):
             (root / "noshebang").write_text("gcloud secrets versions destroy 3 --secret=x\n")
             (root / "noshebang").chmod(0o755)
             (root / "ok.sh").write_text("echo ok\n")
-            for command in ["bash < args.sh", "cat args.sh | bash", "./noshebang"]:
+            (root / "sub").mkdir()
+            (root / "sub" / "plain").write_text("gcloud secrets versions destroy 3 --secret=x\n")
+            (root / "sub" / "ok.sh").write_text("echo ok\n")
+            for command in ["bash < args.sh", "cat args.sh | bash", "./noshebang", "cd sub && bash plain", "cd sub && source plain",
+                            f"S={root}/sub; bash $S/plain", "bash -x args.sh"]:
                 with self.subTest(command=command):
                     self.assertIsNotNone(run(command, cwd=d))
             self.assertIsNone(run("bash ok.sh", cwd=d))
+            self.assertIsNone(run("cd sub && bash ok.sh && kubectl get secrets -n app", cwd=d))
+            self.assertIsNone(run("bash < ok.sh; kubectl get secrets -n app", cwd=d))
             # A script that can't be read, in a command that mentions Secret Manager, is refused.
             self.assertIsNotNone(run("bash missing.sh; gcloud secrets list", cwd=d))
             self.assertIsNone(run("bash missing.sh", cwd=d))
