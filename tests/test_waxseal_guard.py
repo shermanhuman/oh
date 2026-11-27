@@ -137,7 +137,8 @@ HOLES = [
 # Refused only because they mention Secret Manager in text the guard can't read for certain.
 UNSURE_DENIED = [
     "echo \"unclosed; gcloud secrets list",
-    "$CMD --version; gcloud secrets list",
+    "$CMD; gcloud secrets list",
+    "$SH <<'EOF'\ns=secrets; gcloud $s versions destroy 3 --secret=x\nEOF",
     "bash <<< 'gcloud secrets list'",
     "cat <<EOF\ngcloud secrets list",
 ]
@@ -234,7 +235,7 @@ ALLOWED = [
     "gcloud secrets versions --no-quiet list foo",
     "declare -A ROW; ROW[secrets]=\"listed\"; [ -z \"$x\" ] && echo secrets",
     "kubectl get secret default-twenty-secrets -o name; D=~/x/secrets; ls $D",
-    "cat > check.sh <<'EOF'\n# never prints secrets\n$CHECK --all\nEOF",
+    "cat > check.sh <<'EOF'\n# never prints passwords\n$CHECK --all\nEOF",
     "case $n in breakdown-*) echo web;; *) echo other;; esac; gcloud secrets list",
     "git commit -m \"$(cat <<'EOF'\nguard: refuse Secret Manager value reads (secrets stay in GSM)\nEOF\n)\"",
     "gh pr create --title \"secrets guard fixes\" --body \"$(cat <<'EOF'\n## gcloud secrets list still works\nit's fine :)\nEOF\n)\"",
@@ -243,6 +244,16 @@ ALLOWED = [
     "gcloud compute instances list --format json",
     "echo hi > out.txt; cat out.txt; gcloud secrets list",
     'grep -n -e "#171" -e "gcloud" $S/pr193-body.md | head -30',
+    'gcloud --access-token-file "$T" compute instances list',
+    'gc() { gcloud "$@"; }; gc compute instances list',
+    "~/.local/bin/hc send t2d \"staging secrets still hold production's values\"",
+    "V=/opt/venv/bin/python; $V - <<'EOF'\nprint('secrets listed')\nEOF",
+    'git commit -m "$(cat msg.txt)"; gcloud secrets list',
+    "$PY -m unittest discover -s tests -k secrets",
+    "cp a.txt b.txt && $PY $S/check.py --secrets-only",
+    "sed -i 's/a/b/' x.py && $V/bin/python -m unittest discover -s tests -k secrets",
+    "$V - <<'EOF'\nfiles = [f for f in x if f'{f}' != 'secrets']\nprint({'a': 1})\nEOF",
+    "V=/usr/bin/python3; cp a b && $V - <<'EOF'\nprint('no `kubeseal` here, secrets stay put')\nEOF",
 ]
 
 # Outside the guard's scope by design (the rule still forbids them): interpreter code.
@@ -288,7 +299,8 @@ class Guard(unittest.TestCase):
                 out = run(command)
                 self.assertIsNotNone(out)
                 self.assertIn("names a Secret Manager value read or write", out["permissionDecisionReason"])
-                self.assertIn("quoted heredoc", out["permissionDecisionReason"])
+                self.assertIn("--body-file", out["permissionDecisionReason"])
+                self.assertNotIn("quoted heredoc", out["permissionDecisionReason"])
 
     def test_unsure_denied(self):
         for command in UNSURE_DENIED:
