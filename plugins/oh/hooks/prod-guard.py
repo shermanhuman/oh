@@ -6,8 +6,14 @@ or rollout restarts, Argo refreshes, migration Jobs and deploy scripts)
 goes ahead without asking, except a destructive change inside it. It looks
 only at what a shell would execute, using the parser in shell.py.
 
+Allowed, the one merge an agent makes itself (Sugarhouse's decision 96):
+`gh pr merge <full PR URL> --squash` through Sugarhouse's wrapper (also via
+`mise exec --` or `sugar gh`), which asks the board and refuses anything but a
+green squash into rc or hotfix. No other method, `--admin`, `--auto`, `-R` or
+`--as-owner`; on a machine without the wrapper, or over ssh, it's denied.
+
 Denied, because they are always the user's step:
-- `gh pr merge`, `gh api` merging a pull request (REST PUT or a GraphQL
+- any other `gh pr merge`, `gh api` merging a pull request (REST PUT or a GraphQL
   merge/auto-merge mutation), `gh repo delete` and `gh api -X DELETE repos/o/r`;
 - `git push` that forces (`--force`, `-f`, `--force-with-lease`, a `+refspec`),
   pushes every branch (`--mirror`, `--all`), or lands on the default branch
@@ -300,9 +306,41 @@ def git_finding(args, where):
     return (DENY, f"pushes to the default branch `{hit}`") if hit else None
 
 
-def gh_finding(args, where):
+PR_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+/?")
+# Anything that would let a merge skip the wrapper's check (sugarhouse
+# decision 96): another method, an admin or auto merge, another repository,
+# or acting as the owner.
+MERGE_FORBIDDEN = ("--admin", "--auto", "--merge", "-m", "--rebase", "-r", "-R", "--repo", "--as-owner")
+
+
+def wrapped_gh(where):
+    """Sugarhouse's wrapper is this machine's gh (sugar setup-identity)."""
+    if where.remote:
+        return False
+    home = pathlib.Path(os.environ.get("HOME") or pathlib.Path.home())
+    return (home / ".local/share/sugarhouse/wrap/gh").is_file()
+
+
+def agent_merge(args, where, via_sugar):
+    """The one merge an agent makes itself: `gh pr merge <full PR URL> --squash`
+    through Sugarhouse's wrapper (or `sugar gh`), which checks with the board
+    that it's a green squash into rc or hotfix (or a staging-only
+    breakdown-infra PR) and refuses anything else."""
+    if args[:2] != ["pr", "merge"] or len(args) < 3 or not PR_URL.fullmatch(args[2]):
+        return False
+    rest = args[3:]
+    if not any(a in ("--squash", "-s") for a in rest):
+        return False
+    if any(a.split("=", 1)[0] in MERGE_FORBIDDEN for a in rest if a.startswith("-")):
+        return False
+    return via_sugar or wrapped_gh(where)
+
+
+def gh_finding(args, where, via_sugar=False):
     words = positionals(args, GH_VALUE_OPTIONS | GH_API_VALUE_OPTIONS)
     if words[:2] == ["pr", "merge"]:
+        if agent_merge(args, where, via_sugar):
+            return None
         return DENY, "merges a pull request"
     if words[:2] == ["repo", "delete"]:
         return DENY, "deletes a repository"
@@ -591,6 +629,14 @@ def argv_findings(argv, where, depth):
         yield git_finding(args, where)
     elif name == "gh":
         yield gh_finding(args, where)
+    elif name == "sugar" and args[:1] == ["gh"]:
+        rest = args[1:]
+        if "--as-owner" in rest:  # acting as the owner never merges (decision 96)
+            rest = [a for a in rest if a != "--as-owner"]
+            if positionals(rest, GH_VALUE_OPTIONS)[:2] == ["pr", "merge"]:
+                yield DENY, "merges a pull request as the owner"
+                return
+        yield gh_finding(rest, where, via_sugar=True)
     elif name == "psql":
         yield from psql_findings(args, where, env)
     elif name in NETWORK:

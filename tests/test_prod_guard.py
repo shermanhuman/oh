@@ -255,6 +255,64 @@ def git(*args, cwd):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
+URL = "https://github.com/Applesauce-Labs/sugarhouse/pull/9"
+
+
+class AgentMerge(unittest.TestCase):
+    """Sugarhouse decision 96: the agent's squash into rc or hotfix, through the wrapper."""
+
+    def setUp(self):
+        self.home = pathlib.Path(tempfile.mkdtemp(prefix="agent-merge-"))
+        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
+        (self.home / ".kube").mkdir()
+        (self.home / ".kube/config").write_text("apiVersion: v1\ncontexts: []\n")
+
+    def wrap(self):
+        w = self.home / ".local/share/sugarhouse/wrap"
+        w.mkdir(parents=True)
+        (w / "gh").write_text("#!/bin/sh\n")
+
+    def decision(self, command):
+        out = run(command, env={"HOME": str(self.home)})
+        return out and out["permissionDecision"]
+
+    def test_the_allowed_form(self):
+        self.wrap()
+        for command in [
+            f"gh pr merge {URL} --squash",
+            f"gh pr merge {URL} -s -d --match-head-commit abc",
+            f"mise exec -- gh pr merge {URL} --squash --subject 'feat: x'",
+            f"~/.local/share/sugarhouse/bin/sugar gh pr merge {URL} --squash",
+        ]:
+            with self.subTest(command=command):
+                self.assertIsNone(self.decision(command))
+
+    def test_everything_else_is_denied(self):
+        self.wrap()
+        for command in [
+            "gh pr merge 9 --squash",                          # no URL
+            f"gh pr merge --squash {URL}",                     # the URL isn't straight after merge
+            f"gh pr merge {URL}",                              # no --squash
+            f"gh pr merge {URL} --squash --merge",
+            f"gh pr merge {URL} --squash --admin",
+            f"gh pr merge {URL} --squash --auto",
+            f"gh pr merge {URL} --squash -R o/r",
+            f"gh -R o/r pr merge {URL} --squash",
+            f"gh pr merge {URL} --squash --repo=o/r",
+            f"gh pr merge https://github.com/o/r/issues/9 --squash",
+            f"~/.local/share/sugarhouse/bin/sugar gh --as-owner pr merge {URL} --squash",
+            f"ssh vm 'gh pr merge {URL} --squash'",
+            "gh api -X PUT repos/o/r/pulls/9/merge",
+        ]:
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "deny")
+
+    def test_without_the_wrapper_it_is_denied(self):
+        self.assertEqual(self.decision(f"gh pr merge {URL} --squash"), "deny")
+        # sugar gh is the wrapper itself.
+        self.assertIsNone(self.decision(f"~/.local/share/sugarhouse/bin/sugar gh pr merge {URL} --squash"))
+
+
 class Guard(unittest.TestCase):
     def check(self, commands, decision, cwd=OUTSIDE):
         for command in commands:
