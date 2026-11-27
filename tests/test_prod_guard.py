@@ -280,12 +280,19 @@ class AgentMerge(unittest.TestCase):
         line = "# sugarhouse: merge-check\n" if mark else ""
         (self.wrapdir / "gh").write_text(f"#!/bin/sh\n# gh as the Sugarhouse GitHub App\n{line}exec '{self.sugar}' gh \"$@\"\n")
         (self.wrapdir / "gh").chmod(0o755)
-        conf = self.home / ".config/mise/conf.d"
-        conf.mkdir(parents=True)
-        (conf / "sugarhouse.toml").write_text(f"[env]\n_.path = [\"{self.wrapdir}\"]\n")
+        self.mise_path(f"{self.wrapdir}:{self.realdir}")
+
+    def mise_path(self, path):
+        """What a fake mise says its PATH is (`mise env --json`), like a real one
+        with Sugarhouse's conf.d entry, or a project config that puts another gh first."""
+        (self.home / "mise-path").write_text(path)
+        mise = self.realdir / "mise"
+        mise.write_text("#!/bin/sh\n[ \"$*\" = \"env --json\" ] || [ \"$*\" = \"-q env --json\" ] || exit 2\n"
+                        f"printf '{{\"PATH\": \"%s\"}}' \"$(cat '{self.home}/mise-path')\"\n")
+        mise.chmod(0o755)
 
     def decision(self, command, first=None):
-        path = f"{first or self.realdir}:/usr/bin:/bin"
+        path = f"{first}:{self.realdir}:/usr/bin:/bin" if first else f"{self.realdir}:/usr/bin:/bin"
         out = run(command, env={"HOME": str(self.home), "PATH": path})
         return out and out["permissionDecision"]
 
@@ -296,6 +303,8 @@ class AgentMerge(unittest.TestCase):
             f"mise exec -- gh pr merge {URL} -s -d --match-head-commit abc",
             f"MISE_EXEC_AUTO_INSTALL=false mise exec -- gh pr merge {URL} --squash --subject 'feat: x'",
             f"mise x -- gh pr merge {URL} --squash",
+            f"mise -q exec -- gh pr merge {URL} --squash",
+            f"mise -C /tmp exec -- gh pr merge {URL} --squash",
         ]:
             with self.subTest(command=command):
                 self.assertIsNone(self.decision(command))
@@ -317,6 +326,10 @@ class AgentMerge(unittest.TestCase):
             f"{self.realdir}/gh pr merge {URL} --squash",
             f"ssh vm 'mise exec -- gh pr merge {URL} --squash'",
             "mise exec -- gh api -X PUT repos/o/r/pulls/9/merge",
+            "mise -C /tmp exec -- gh pr merge 9 --admin",       # global options before exec are seen
+            "mise -q x -- gh pr merge 9 --admin",
+            f"{self.realdir}/mise exec -- gh pr merge 9 --admin",  # mise by path
+            f"mise exec -- env PATH=/x gh pr merge {URL} --squash",  # something between -- and gh
         ]:
             with self.subTest(command=command):
                 self.assertEqual(self.decision(command, self.wrapdir), "deny")
@@ -331,6 +344,24 @@ class AgentMerge(unittest.TestCase):
                 # The wrapper by path is checked as gh, never read as a script.
                 self.assertEqual(self.decision(f"{self.wrapdir}/gh pr merge 9 --admin"), "deny")
 
+    def test_a_quoted_sugar_path(self):
+        self.sugar = self.home / "my sugar/sugar"  # shellQuote's form: '/path with space/sugar'
+        self.wrap()
+        self.assertIsNone(self.decision(f"mise exec -- gh pr merge {URL} --squash"))
+
+    def test_mise_running_another_gh_is_denied(self):
+        self.wrap()
+        self.mise_path(f"{self.realdir}:{self.wrapdir}")  # e.g. a project's [env] _.path
+        out = run(f"mise exec -- gh pr merge {URL} --squash", env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("not Sugarhouse's wrapper", out["permissionDecisionReason"])
+
+    def test_global_mise_options_were_a_blind_spot(self):
+        for command in ["mise -C /tmp exec -- git push --force", "mise -q x -- git push origin HEAD:main",
+                        "/usr/local/bin/mise exec -- git push --force"]:
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "deny")
+
     def test_without_the_wrapper_it_is_denied(self):
         self.assertEqual(self.decision(f"mise exec -- gh pr merge {URL} --squash"), "deny")
 
@@ -338,6 +369,9 @@ class AgentMerge(unittest.TestCase):
         out = run("gh pr merge 9 --squash", env={"HOME": str(self.home)})
         self.assertIn("mise exec -- gh pr merge <full PR URL> --squash", out["permissionDecisionReason"])
         self.assertNotIn("always the user's", out["permissionDecisionReason"])
+        self.wrap(mark=False)
+        out = run(f"mise exec -- gh pr merge {URL} --squash", env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
+        self.assertIn("predates the merge check", out["permissionDecisionReason"])
 
 
 class Guard(unittest.TestCase):

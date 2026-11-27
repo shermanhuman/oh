@@ -337,28 +337,68 @@ def is_wrapper(word, where):
 
 
 def checked_merge(argv, run, where):
-    """Whether this `pr merge` runs through a wrapper that checks it with the
-    board: only `mise exec -- gh` (Sugarhouse's conf.d entry puts the wrapper
-    first), with the wrapper carrying the mark and the sugar binary it runs
-    holding it too, so an older or rolled-back sugar is denied."""
-    if where.remote or run[0] != "gh" or "mise" not in argv[:len(argv) - len(run)]:
-        return False
+    """None when this `pr merge` runs through a wrapper that checks it with the
+    board, else what's missing. Only `mise exec -- gh`: mise itself is asked
+    which gh it will run (in the command's directory and environment), the
+    wrapper must carry the mark, and the sugar binary it runs must hold it,
+    so an older or rolled-back sugar is denied."""
+    starts = [i for i, w in enumerate(argv) if os.path.basename(w) == "mise" and shell.mise_exec_at(argv, i) is not None]
+    if where.remote or run[0] != "gh" or not starts:
+        return "it isn't `mise exec -- gh`"
+    at = starts[0]
+    rest = argv[shell.mise_exec_at(argv, at) + 1:]
+    if "--" not in rest or rest[rest.index("--") + 1:] != run:
+        return "it isn't `mise exec -- gh`"
     wrap = wrapper_path()
     try:
         text = wrap.read_text(errors="ignore")
-        conf = (sugarhouse_home() / ".config/mise/conf.d/sugarhouse.toml").read_text(errors="ignore")
     except OSError:
-        return False
-    if MERGE_CHECK_MARK not in text or str(wrap.parent) not in conf:
-        return False
-    target = re.search(r"^exec\s+'?([^'\s]+)'?\s+gh\b", text, re.M)
+        return "Sugarhouse's gh wrapper isn't installed (`sugar setup-identity`)"
+    if MERGE_CHECK_MARK not in text:
+        return "the wrapper predates the merge check: install sugarhouse 0.19.0 or later and run `sugar setup-identity`"
+    target = re.search(r"^exec\s+('(?:[^']|'\\'')*'|\S+)\s+gh\b", text, re.M)
     if not target:
-        return False
+        return "the wrapper doesn't say which sugar it runs"
+    sugar = target.group(1)
+    if sugar.startswith("'"):
+        sugar = sugar[1:-1].replace("'\\''", "'")
     try:
-        with open(os.path.realpath(target.group(1)), "rb") as binary:
-            return MERGE_CHECK_MARK.encode() in binary.read()
+        with open(os.path.realpath(sugar), "rb") as binary:
+            if MERGE_CHECK_MARK.encode() not in binary.read():
+                return "the sugar the wrapper runs predates the merge check: install sugarhouse 0.19.0 or later"
     except OSError:
-        return False
+        return "the sugar the wrapper runs can't be read"
+    # Ask mise which gh it will run there: a project's config or the
+    # command's own variables could put another gh first.
+    cwd = pathlib.Path(where.cwd)
+    global_options = argv[at + 1:shell.mise_exec_at(argv, at)]
+    for k, option_name in enumerate(global_options):
+        if option_name in ("-C", "--cd") and k + 1 < len(global_options):
+            cwd = cwd / os.path.expanduser(global_options[k + 1])
+        elif option_name.startswith("--cd="):
+            cwd = cwd / os.path.expanduser(option_name.split("=", 1)[1])
+    env = {**os.environ, **where.env, **assignments(argv[:at])}
+    mise = argv[at] if "/" in argv[at] else shutil.which("mise", path=env.get("PATH", ""))
+    keep, k = [], 0
+    while k < len(global_options):
+        if global_options[k] in ("-C", "--cd"):
+            k += 2
+            continue
+        if not global_options[k].startswith("--cd="):
+            keep.append(global_options[k])
+        k += 1
+    try:
+        out = subprocess.run([os.path.expanduser(mise or "mise"), *keep, "env", "--json"],
+                             cwd=cwd, env=env, capture_output=True, text=True, timeout=5)
+        path = json.loads(out.stdout).get("PATH", "") if out.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
+        path = None
+    if path is None:
+        return "mise couldn't say which gh it runs there"
+    found = shutil.which("gh", path=path)
+    if not found or pathlib.Path(found).resolve() != wrap.resolve():
+        return f"mise runs {found or 'no gh'} there, not Sugarhouse's wrapper"
+    return None
 
 
 def agent_merge(args):
@@ -374,8 +414,11 @@ def agent_merge(args):
 def gh_finding(args, where, checked=None):
     words = positionals(args, GH_VALUE_OPTIONS | GH_API_VALUE_OPTIONS)
     if words[:2] == ["pr", "merge"]:
-        if agent_merge(args) and checked and checked():
-            return None
+        if agent_merge(args):
+            missing = checked() if checked else "it isn't `mise exec -- gh`"
+            if not missing:
+                return None
+            return DENY, f"merges a pull request, and the agent's merge form doesn't apply because {missing}"
         return DENY, "merges a pull request"
     if words[:2] == ["repo", "delete"]:
         return DENY, "deletes a repository"

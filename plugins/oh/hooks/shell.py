@@ -8,6 +8,7 @@ with the result; nothing here knows about any one rule.
 Loaded by path (see `load` in each guard), because `python3 -I` leaves the
 hook's own directory off sys.path.
 """
+import os
 import pathlib
 import re
 import shlex
@@ -173,6 +174,19 @@ def simple_commands(text):
     return [argv for argv in commands if argv], substs
 
 
+# mise's global options that take a value, before its subcommand.
+MISE_VALUE_OPTIONS = {"-C", "--cd", "-E", "--env", "-j", "--jobs", "--output"}
+
+
+def mise_exec_at(argv, i):
+    """The index of `exec` or `x` in a mise command starting at i (global
+    options such as -C dir or -q may come first), or None."""
+    j = i + 1
+    while j < len(argv) and argv[j].startswith("-") and argv[j] != "--":
+        j += 2 if argv[j] in MISE_VALUE_OPTIONS else 1
+    return j if j < len(argv) and argv[j] in ("exec", "x") else None
+
+
 def program(argv):
     """Strip env assignments and wrapper commands; return the argv that runs."""
     i = 0
@@ -189,9 +203,9 @@ def program(argv):
                 i += 2 if argv[i] in value_options else 1
             if word == "timeout" and i < len(argv):
                 i += 1
-        elif word == "mise" and i + 1 < len(argv) and argv[i + 1] in ("exec", "x"):
-            rest = argv[i + 2:]
-            i = i + 2 + (rest.index("--") + 1 if "--" in rest else len(rest))
+        elif os.path.basename(word) == "mise" and mise_exec_at(argv, i) is not None:
+            rest = argv[mise_exec_at(argv, i) + 1:]
+            i = len(argv) - len(rest) + (rest.index("--") + 1 if "--" in rest else len(rest))
         else:
             break
     return argv[i:]
