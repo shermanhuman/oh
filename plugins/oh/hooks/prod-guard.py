@@ -6,8 +6,16 @@ or rollout restarts, Argo refreshes, migration Jobs and deploy scripts)
 goes ahead without asking, except a destructive change inside it. It looks
 only at what a shell would execute, using the parser in shell.py.
 
+Allowed, the one merge an agent makes itself (Sugarhouse's decision 96):
+`mise exec -- gh pr merge <full PR URL> --squash`, where Sugarhouse's mise
+entry makes gh its wrapper, which asks the board and refuses anything but a
+green squash into rc or hotfix (other methods, --admin, --auto and -R
+included). The wrapper must carry the merge-check mark and the sugar it runs
+must hold it, so an older or rolled-back sugar is denied. Bare gh, the
+wrapper or the real gh by path, `sugar gh`, `--as-owner` and ssh are denied.
+
 Denied, because they are always the user's step:
-- `gh pr merge`, `gh api` merging a pull request (REST PUT or a GraphQL
+- any other `gh pr merge`, `gh api` merging a pull request (REST PUT or a GraphQL
   merge/auto-merge mutation), `gh repo delete` and `gh api -X DELETE repos/o/r`;
 - `git push` that forces (`--force`, `-f`, `--force-with-lease`, a `+refspec`),
   pushes every branch (`--mirror`, `--all`), or lands on the default branch
@@ -40,6 +48,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 
@@ -300,9 +309,104 @@ def git_finding(args, where):
     return (DENY, f"pushes to the default branch `{hit}`") if hit else None
 
 
-def gh_finding(args, where):
+PR_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+/?")
+# In a sugar whose `gh` checks merges with the board (sugarhouse#128 and
+# later): its binary holds the string, and the wrapper it writes carries it.
+MERGE_CHECK_MARK = "# sugarhouse: merge-check"
+AGENT_MERGE = ("The one merge an agent makes itself is `mise exec -- gh pr merge <full PR URL> --squash` "
+               "through Sugarhouse's wrapper, into rc or hotfix; any other merge is the user's. ")
+
+
+def sugarhouse_home():
+    return pathlib.Path(os.environ.get("HOME") or pathlib.Path.home())
+
+
+def wrapper_path():
+    return sugarhouse_home() / ".local/share/sugarhouse/wrap/gh"
+
+
+def is_wrapper(word, where):
+    """A gh given by path that is Sugarhouse's wrapper, or a link to it."""
+    path = pathlib.Path(os.path.expanduser(word))
+    if not path.is_absolute():
+        path = pathlib.Path(where.cwd) / path
+    try:
+        return path.resolve() == wrapper_path().resolve()
+    except OSError:
+        return False
+
+
+def checked_merge(argv, run, where):
+    """None when this `pr merge` runs through a wrapper that checks it with the
+    board, else what's missing. Only `mise exec -- gh`: mise itself is asked
+    which gh it will run (in the command's directory and environment), the
+    wrapper must carry the mark, and the sugar binary it runs must hold it,
+    so an older or rolled-back sugar is denied."""
+    found_mise = next(((i, shell.mise_exec(argv, i)) for i in range(len(argv)) if shell.mise_exec(argv, i)), None)
+    if where.remote or run[0] != "gh" or not found_mise:
+        return "it isn't `mise exec -- gh`"
+    at, m = found_mise
+    if m.unreadable or m.start is None or argv[m.start:] != run:
+        return "it isn't `mise exec -- gh`"
+    wrap = wrapper_path()
+    try:
+        text = wrap.read_text(errors="ignore")
+    except OSError:
+        return "Sugarhouse's gh wrapper isn't installed (`sugar setup-identity`)"
+    if MERGE_CHECK_MARK not in text:
+        return "the wrapper predates the merge check: install a sugarhouse release with the merge check (sugarhouse#128) and run `sugar setup-identity`"
+    target = re.search(r"^exec\s+('(?:[^']|'\\'')*'|\S+)\s+gh\b", text, re.M)
+    if not target:
+        return "the wrapper doesn't say which sugar it runs"
+    sugar = target.group(1)
+    if sugar.startswith("'"):
+        sugar = sugar[1:-1].replace("'\\''", "'")
+    try:
+        with open(os.path.realpath(sugar), "rb") as binary:
+            if MERGE_CHECK_MARK.encode() not in binary.read():
+                return "the sugar the wrapper runs predates the merge check: install a sugarhouse release with the merge check (sugarhouse#128)"
+    except OSError:
+        return "the sugar the wrapper runs can't be read"
+    # Ask mise which gh it will run there (where.cwd already follows -C): a
+    # project's config or the command's own variables could put another gh
+    # first. Offline, so a missing pinned tool doesn't wait on the network.
+    env = {**os.environ, **where.env, **assignments(argv[:at]), "MISE_OFFLINE": "1"}
+    mise = argv[at] if "/" in argv[at] else shutil.which("mise", path=env.get("PATH", ""))
+    error = ""
+    try:
+        out = subprocess.run([os.path.expanduser(mise or "mise"), "env", "--json"],
+                             cwd=where.cwd, env=env, capture_output=True, text=True, timeout=5)
+        path = json.loads(out.stdout).get("PATH", "") if out.returncode == 0 else None
+        lines = [l.strip() for l in out.stderr.splitlines() if l.strip() and "--verbose" not in l and "MISE_VERBOSE" not in l]
+        error = "; ".join(lines)[:300]  # real mise puts the cause (e.g. "not trusted") on a later line
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError) as e:
+        path, error = None, str(e)[:200]
+    if path is None:
+        return "mise couldn't say which gh it runs there" + (f" ({error})" if error else "")
+    found = shutil.which("gh", path=path)
+    if not found or pathlib.Path(found).resolve() != wrap.resolve():
+        return f"mise runs {found or 'no gh'} there, not Sugarhouse's wrapper"
+    return None
+
+
+def agent_merge(args):
+    """The merge form of Sugarhouse decision 96. The wrapper checks the rest
+    (green, squash, the base, the head) and refuses anything else; the guard
+    only keeps the owner out of it."""
+    if args[:2] != ["pr", "merge"] or len(args) < 3 or not PR_URL.fullmatch(args[2]):
+        return False
+    rest = args[3:]
+    return any(a in ("--squash", "-s") for a in rest) and "--as-owner" not in rest
+
+
+def gh_finding(args, where, checked=None):
     words = positionals(args, GH_VALUE_OPTIONS | GH_API_VALUE_OPTIONS)
     if words[:2] == ["pr", "merge"]:
+        if agent_merge(args):
+            missing = checked() if checked else "it isn't `mise exec -- gh`"
+            if not missing:
+                return None
+            return DENY, f"merges a pull request, and the agent's merge form doesn't apply because {missing}"
         return DENY, "merges a pull request"
     if words[:2] == ["repo", "delete"]:
         return DENY, "deletes a repository"
@@ -545,6 +649,13 @@ def argv_findings(argv, where, depth):
     run = program(argv)
     if not run:
         return
+    for d in shell.program_dirs(argv):  # `mise -C dir exec -- ...` runs in dir
+        where = where.but(cwd=where.path(d))
+    # MISE_CD moves mise like -C, from the command's variables or an earlier
+    # export: the plain form is -C, which the guard follows. Checked before
+    # anything below can return (a shell, -c text, a script).
+    if ("MISE_CD" in env or "MISE_CD" in where.env) and any(shell.mise_exec(argv, i) for i in range(len(argv))):
+        run = [shell.MISE_UNREADABLE] + run
     name, args = os.path.basename(run[0]), run[1:]
     # A child shell inherits the command's variables (`PGHOST=x bash -c ...`), and a
     # script runs in the caller's directory, not its own.
@@ -562,11 +673,18 @@ def argv_findings(argv, where, depth):
                     yield from findings(text, child, depth + 1)
                 return
         return
-    if "/" in run[0]:
+    if "/" in run[0] and is_wrapper(run[0], where):
+        name = "gh"  # Sugarhouse's wrapper by path: its arguments are what matter, not its text
+    elif "/" in run[0]:
         text = script(run[0], where)[1]
         if text:
             yield from findings(text, child, depth + 1)
             return
+    if run[0] == shell.MISE_UNREADABLE:
+        yield DENY, ("runs a `mise exec` the guard can't read (an option other than -C, -q, -y, -v or -c, a "
+                     "joined form such as -qC or -Cdir, or MISE_CD). Write it plainly, `mise exec -- <command>` or "
+                     "`mise -C <dir> exec -- <command>`, and run it again: this isn't a step reserved for the user")
+        return
     if name == "eval":
         yield from findings(" ".join(args), child, depth + 1)
     elif name == "ssh":
@@ -590,7 +708,9 @@ def argv_findings(argv, where, depth):
     elif name == "git":
         yield git_finding(args, where)
     elif name == "gh":
-        yield gh_finding(args, where)
+        yield gh_finding(args, where, checked=lambda: checked_merge(argv, run, where))
+    elif name == "sugar" and args[:1] == ["gh"]:
+        yield gh_finding(args[1:], where)
     elif name == "psql":
         yield from psql_findings(args, where, env)
     elif name in NETWORK:
@@ -711,9 +831,13 @@ def decide(event):
     decision, why = next((f for f in found if f[0] == DENY), None) or (found[0] if found else (None, None))
     if not decision:
         return None
+    if decision == DENY and "the guard can't read" in why:
+        return DENY, f"Blocked by oh: this command {why}."
     if decision == DENY:
         return DENY, (
-            f"Blocked by oh: this command {why}. That step is always the user's. Stop, tell them what you "
+            f"Blocked by oh: this command {why}. "
+            + (AGENT_MERGE if "merges a pull request" in why else "That step is always the user's. ")
+            + "Stop, tell them what you "
             "wanted to do and why, and hand them the exact command (they can run it with `! <command>`). "
             "Don't look for another route to the same result."
         )

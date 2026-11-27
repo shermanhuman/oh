@@ -8,6 +8,7 @@ with the result; nothing here knows about any one rule.
 Loaded by path (see `load` in each guard), because `python3 -I` leaves the
 hook's own directory off sys.path.
 """
+import os
 import pathlib
 import re
 import shlex
@@ -20,7 +21,7 @@ KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}",
 # Words that run the rest of the line as a command, and their options that take a value.
 RUNNERS = {
     "sudo": {"-u", "-g", "-U", "-C", "-D", "-h", "-p", "-r", "-t", "-T"},
-    "env": {"-u", "-C", "-S"},
+    "env": {"-u", "-C", "-S", "--chdir", "--unset"},
     "timeout": {"-s", "-k", "--signal", "--kill-after"},
     "nice": {"-n"},
     "xargs": {"-I", "-n", "-P", "-L", "-d", "-s", "-E", "-a"},
@@ -173,28 +174,127 @@ def simple_commands(text):
     return [argv for argv in commands if argv], substs
 
 
-def program(argv):
-    """Strip env assignments and wrapper commands; return the argv that runs."""
-    i = 0
+# The mise options the guard reads. Anything else in a `mise exec` (another
+# option, a joined form such as -qC or -Cdir, -E or -P which change the
+# config) makes it unreadable, and the production guard refuses it with the
+# plain form to use instead: mise's syntax is wider than any list.
+MISE_FLAGS = {"-q", "--quiet", "-y", "--yes", "-v", "--verbose"}
+
+
+MISE_UNREADABLE = "<mise the guard can't read>"
+
+
+class MiseExec:
+    """One `mise [-C dir] exec|x [-C dir] [tools] (-- argv | -c text)`, the
+    only place the guard reads a mise command: the directory it runs in (the
+    last -C, from where mise starts), its -c text, and where the command after
+    `--` starts. `unreadable` is set for anything outside that form."""
+
+    def __init__(self):
+        self.dir, self.command, self.start, self.unreadable = None, None, None, False
+
+
+def _mise_options(argv, j, m, allow_command):
+    """Read options from j up to a non-option or `--`; returns the next index."""
+    while j < len(argv) and argv[j].startswith("-") and argv[j] != "--":
+        word = argv[j]
+        if word in MISE_FLAGS:
+            j += 1
+        elif word in ("-C", "--cd") and j + 1 < len(argv):
+            m.dir, j = argv[j + 1], j + 2
+        elif word.startswith("--cd="):
+            m.dir, j = word.split("=", 1)[1], j + 1
+        elif allow_command and word in ("-c", "--command") and j + 1 < len(argv):
+            m.command, j = argv[j + 1], j + 2
+        elif allow_command and word.startswith("--command="):
+            m.command, j = word.split("=", 1)[1], j + 1
+        else:
+            m.unreadable = True
+            return len(argv)
+    return j
+
+
+def mise_exec(argv, i):
+    """The MiseExec for a mise command at argv[i], or None if it isn't exec."""
+    if os.path.basename(argv[i]) != "mise":
+        return None
+    m = MiseExec()
+    j = _mise_options(argv, i + 1, m, False)
+    if m.unreadable:
+        # Can't tell the subcommand. It's exec if `exec` or `x` comes among
+        # the words up to the first two non-option words in a row (an unknown
+        # option's value, then the subcommand and its first argument), so
+        # `mise -E prod run test -- --grep exec` isn't taken for one.
+        seen, last_plain = [], False
+        for w in argv[i + 1:]:
+            if w == "--":
+                break
+            plain = not w.startswith("-")
+            if plain:
+                seen.append(w)
+                if last_plain:
+                    break
+            last_plain = plain
+        return m if any(w in ("exec", "x") for w in seen) else None
+    if j >= len(argv) or argv[j] not in ("exec", "x"):
+        return None
+    j += 1
+    while j < len(argv) and argv[j] != "--" and not m.unreadable:
+        if argv[j].startswith("-"):
+            j = _mise_options(argv, j, m, True)
+        else:
+            j += 1  # a tool, such as gh@2
+    if m.unreadable:
+        return m
+    if j < len(argv) and m.command is None:
+        m.start = j + 1
+    return m
+
+
+def _walk(argv):
+    """The argv that runs, and the directories mise moves it into on the way."""
+    i, dirs = 0, []
     while i < len(argv):
         word = argv[i]
         if ASSIGNMENT.match(word) or word in KEYWORDS:
             i += 1
         elif word == "command" and i + 1 < len(argv) and argv[i + 1] in ("-v", "-V"):
-            return ["which"] + argv[i + 2:]
+            return ["which"] + argv[i + 2:], dirs
         elif word in RUNNERS:
             value_options = RUNNERS[word]
             i += 1
             while i < len(argv) and argv[i].startswith("-"):
+                if word == "env" and argv[i] in ("-C", "--chdir") and i + 1 < len(argv):
+                    dirs.append(argv[i + 1])  # env -C dir runs the command there
+                elif word == "env" and argv[i].startswith("--chdir="):
+                    dirs.append(argv[i].split("=", 1)[1])
                 i += 2 if argv[i] in value_options else 1
             if word == "timeout" and i < len(argv):
                 i += 1
-        elif word == "mise" and i + 1 < len(argv) and argv[i + 1] in ("exec", "x"):
-            rest = argv[i + 2:]
-            i = i + 2 + (rest.index("--") + 1 if "--" in rest else len(rest))
+        elif mise_exec(argv, i):
+            m = mise_exec(argv, i)
+            if m.unreadable:
+                return [MISE_UNREADABLE] + argv[i:], dirs
+            if m.dir is not None:
+                dirs.append(m.dir)
+            if m.command is not None:
+                return ["sh", "-c", m.command], dirs  # read like any shell's -c text
+            if m.start is None:
+                return [], dirs  # mise runs nothing without -- or -c
+            i = m.start
         else:
             break
-    return argv[i:]
+    return argv[i:], dirs
+
+
+def program(argv):
+    """Strip env assignments and wrapper commands; return the argv that runs."""
+    return _walk(argv)[0]
+
+
+def program_dirs(argv):
+    """The directories (in order) that mise's -C moves the program into."""
+    return _walk(argv)[1]
 
 
 def shell_script(arg, cwd):

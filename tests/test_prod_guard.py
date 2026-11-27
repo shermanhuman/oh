@@ -255,6 +255,182 @@ def git(*args, cwd):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
+URL = "https://github.com/Applesauce-Labs/sugarhouse/pull/9"
+
+
+class AgentMerge(unittest.TestCase):
+    """Sugarhouse decision 96: the agent's squash into rc or hotfix, through a wrapper that checks it."""
+
+    def setUp(self):
+        self.home = pathlib.Path(tempfile.mkdtemp(prefix="agent-merge-"))
+        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
+        (self.home / ".kube").mkdir()
+        (self.home / ".kube/config").write_text("apiVersion: v1\ncontexts: []\n")
+        self.wrapdir = self.home / ".local/share/sugarhouse/wrap"
+        self.sugar = self.home / ".local/share/sugarhouse/bin/sugar"
+        self.realdir = self.home / "real"
+        self.realdir.mkdir()
+        (self.realdir / "gh").write_bytes(b"\x7fELF fake binary\n")
+        (self.realdir / "gh").chmod(0o755)
+
+    def wrap(self, mark=True, sugar_checks=True):
+        self.wrapdir.mkdir(parents=True)
+        self.sugar.parent.mkdir(parents=True)
+        self.sugar.write_bytes(b"\x7fELF sugar " + (b"# sugarhouse: merge-check" if sugar_checks else b"") + b"\n")
+        line = "# sugarhouse: merge-check\n" if mark else ""
+        # setup-identity's form: shellQuote leaves a plain path unquoted.
+        quoted = f"'{self.sugar}'" if " " in str(self.sugar) else str(self.sugar)
+        (self.wrapdir / "gh").write_text(f"#!/bin/sh\n# gh as the Sugarhouse GitHub App\n{line}exec {quoted} gh \"$@\"\n")
+        (self.wrapdir / "gh").chmod(0o755)
+        self.mise_path(f"{self.wrapdir}:{self.realdir}")
+
+    def mise_path(self, path):
+        """What a fake mise says its PATH is (`mise env --json`), like a real one
+        with Sugarhouse's conf.d entry, or a project config that puts another gh first."""
+        (self.home / "mise-path").write_text(path)
+        mise = self.realdir / "mise"
+        # A directory's own mise-path file stands for a project config there.
+        # Asked offline, so a missing pinned tool never waits on the network.
+        mise.write_text("#!/bin/sh\n[ \"$*\" = \"env --json\" ] || [ \"$*\" = \"-q env --json\" ] || exit 2\n"
+                        "[ \"$MISE_OFFLINE\" = 1 ] || { echo 'not offline' >&2; exit 3; }\n"
+                        f"f='{self.home}/mise-path'; [ -f mise-path ] && f=mise-path\n"
+                        "printf '{\"PATH\": \"%s\"}' \"$(cat \"$f\")\"\n")
+        mise.chmod(0o755)
+
+    def decision(self, command, first=None):
+        path = f"{first}:{self.realdir}:/usr/bin:/bin" if first else f"{self.realdir}:/usr/bin:/bin"
+        out = run(command, env={"HOME": str(self.home), "PATH": path})
+        return out and out["permissionDecision"]
+
+    def test_the_allowed_form(self):
+        self.wrap()
+        for command in [
+            f"mise exec -- gh pr merge {URL} --squash",
+            f"mise exec -- gh pr merge {URL} -s -d --match-head-commit abc",
+            f"MISE_EXEC_AUTO_INSTALL=false mise exec -- gh pr merge {URL} --squash --subject 'feat: x'",
+            f"mise x -- gh pr merge {URL} --squash",
+            f"mise -q exec -- gh pr merge {URL} --squash",
+            f"mise -C /tmp exec -- gh pr merge {URL} --squash",
+        ]:
+            with self.subTest(command=command):
+                self.assertIsNone(self.decision(command))
+
+    def test_everything_else_is_denied(self):
+        self.wrap()
+        for command in [
+            "mise exec -- gh pr merge 9 --squash",                  # no URL
+            f"mise exec -- gh pr merge --squash {URL}",             # the URL isn't straight after merge
+            f"mise exec -- gh pr merge {URL}",                      # no --squash
+            f"mise exec -- gh pr merge https://github.com/o/r/issues/9 --squash",
+            f"mise exec -- gh pr merge {URL} --squash --as-owner",
+            f"gh pr merge {URL} --squash",                          # bare gh, even with the wrapper first
+            f"~/.local/share/sugarhouse/bin/sugar gh pr merge {URL} --squash",
+            f"~/.local/share/sugarhouse/bin/sugar gh --as-owner pr merge {URL} --squash",
+            f"~/.local/share/sugarhouse/wrap/gh pr merge {URL} --squash",
+            f"{self.wrapdir}/gh --as-owner pr merge {URL} --squash",
+            f"{self.wrapdir}/gh pr merge 9 --admin",
+            f"{self.realdir}/gh pr merge {URL} --squash",
+            f"ssh vm 'mise exec -- gh pr merge {URL} --squash'",
+            "mise exec -- gh api -X PUT repos/o/r/pulls/9/merge",
+            "mise -C /tmp exec -- gh pr merge 9 --admin",       # global options before exec are seen
+            "mise -q x -- gh pr merge 9 --admin",
+            f"{self.realdir}/mise exec -- gh pr merge 9 --admin",  # mise by path
+            f"mise exec -- env PATH=/x gh pr merge {URL} --squash",  # something between -- and gh
+        ]:
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command, self.wrapdir), "deny")
+
+    def test_an_older_sugar_is_denied(self):
+        for mark, sugar_checks in [(False, True), (True, False), (False, False)]:
+            with self.subTest(mark=mark, sugar_checks=sugar_checks):
+                shutil.rmtree(self.home / ".local", ignore_errors=True)
+                shutil.rmtree(self.home / ".config", ignore_errors=True)
+                self.wrap(mark, sugar_checks)
+                self.assertEqual(self.decision(f"mise exec -- gh pr merge {URL} --squash"), "deny")
+                # The wrapper by path is checked as gh, never read as a script.
+                self.assertEqual(self.decision(f"{self.wrapdir}/gh pr merge 9 --admin"), "deny")
+
+    def test_a_quoted_sugar_path(self):
+        self.sugar = self.home / "my sugar/sugar"  # shellQuote's form: '/path with space/sugar'
+        self.wrap()
+        self.assertIsNone(self.decision(f"mise exec -- gh pr merge {URL} --squash"))
+
+    def test_mise_running_another_gh_is_denied(self):
+        self.wrap()
+        self.mise_path(f"{self.realdir}:{self.wrapdir}")  # e.g. a project's [env] _.path
+        out = run(f"mise exec -- gh pr merge {URL} --squash", env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("not Sugarhouse's wrapper", out["permissionDecisionReason"])
+
+    def test_mise_c_moves_the_check_into_that_directory(self):
+        self.wrap()
+        project = self.home / "project"
+        project.mkdir()
+        (project / "mise-path").write_text(f"{self.realdir}:{self.wrapdir}")  # its config puts the real gh first
+        for command in [f"mise -C {project} exec -- gh pr merge {URL} --squash",
+                        f"mise x -C {project} -- gh pr merge {URL} --squash",
+                        f"mise exec --cd={project} -- gh pr merge {URL} --squash"]:
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "deny")
+        self.assertIsNone(self.decision(f"mise -C {self.home} exec -- gh pr merge {URL} --squash"))
+
+    def test_mise_c_text_and_hidden_options_are_read(self):
+        for command in ["mise x -c 'gh pr merge 9 --admin'", "mise exec -c 'git push --force'",
+                        "mise exec --command='git push --force'", "mise -P prod exec -- git push --force",
+                        "mise --log-level debug x -- git push --force", "mise exec gh@2 -- gh pr merge 9"]:
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "deny")
+
+    def test_a_mise_exec_the_guard_cannot_read_is_refused_with_the_plain_form(self):
+        self.wrap()
+        for command in ["mise -qC /tmp exec -- ls", "mise -Cwork exec -- ls", "mise -C=work exec -- ls",
+                        "mise x -c'ls'", "mise x -c='ls'", "mise x -qc 'ls'", "mise -E prod exec -- ls",
+                        f"mise x -E prod -- gh pr merge {URL} --squash", f"mise exec -P prod -- gh pr merge {URL} --squash"]:
+            with self.subTest(command=command):
+                out = run(command, env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
+                self.assertEqual(out["permissionDecision"], "deny")
+                self.assertIn("mise exec -- <command>", out["permissionDecisionReason"])
+        # Plain forms, and mise commands that aren't exec, are untouched.
+        for command in ["mise exec -- ls", "mise x node@22 -- node -v", "mise -q exec -- ls", "mise run test",
+                        "mise -E prod run test -- --grep exec", "mise -P ci run lint x",
+                        "mise use -g gh@2", "mise -v", "mise -C /tmp x -- ls"]:
+            with self.subTest(command=command):
+                self.assertIsNone(self.decision(command))
+
+    def test_a_mise_error_shows_its_cause(self):
+        self.wrap()
+        mise = self.realdir / "mise"
+        mise.write_text("#!/bin/sh\necho 'mise ERROR error parsing config file: ~/p/mise.toml' >&2\n"
+                        "echo 'mise ERROR Config files in ~/p/mise.toml are not trusted.' >&2\n"
+                        "echo 'Run with --verbose or MISE_VERBOSE=1 for more information' >&2\nexit 1\n")
+        out = run(f"mise exec -- gh pr merge {URL} --squash", env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
+        self.assertIn("are not trusted", out["permissionDecisionReason"])
+
+    def test_the_last_mise_c_wins(self):
+        self.wrap()
+        project = self.home / "project"
+        project.mkdir()
+        (project / "mise-path").write_text(f"{self.realdir}:{self.wrapdir}")
+        self.assertEqual(self.decision(f"mise -C {self.home} exec -C {project} -- gh pr merge {URL} --squash"), "deny")
+
+    def test_global_mise_options_were_a_blind_spot(self):
+        for command in ["mise -C /tmp exec -- git push --force", "mise -q x -- git push origin HEAD:main",
+                        "/usr/local/bin/mise exec -- git push --force"]:
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "deny")
+
+    def test_without_the_wrapper_it_is_denied(self):
+        self.assertEqual(self.decision(f"mise exec -- gh pr merge {URL} --squash"), "deny")
+
+    def test_a_denied_merge_names_the_allowed_form(self):
+        out = run("gh pr merge 9 --squash", env={"HOME": str(self.home)})
+        self.assertIn("mise exec -- gh pr merge <full PR URL> --squash", out["permissionDecisionReason"])
+        self.assertNotIn("always the user's", out["permissionDecisionReason"])
+        self.wrap(mark=False)
+        out = run(f"mise exec -- gh pr merge {URL} --squash", env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
+        self.assertIn("predates the merge check", out["permissionDecisionReason"])
+
+
 class Guard(unittest.TestCase):
     def check(self, commands, decision, cwd=OUTSIDE):
         for command in commands:
@@ -308,6 +484,16 @@ class Guard(unittest.TestCase):
             git("remote", "set-head", "origin", "trunk", cwd=work)
             self.check(["git push", "git push origin HEAD", "git push -u origin HEAD", "git push origin trunk"], "deny", cwd=str(work))
             self.check([f"git -C {work} push", f"cd {work} && git push"], "deny")
+            # mise's -C moves the command into the repository, before or after exec.
+            self.check([f"mise -C {work} exec -- git push", f"mise x -C {work} -- git push origin HEAD"], "deny")
+            self.check([f"mise -C /tmp exec -C {work} -- git push"], "deny")
+            # MISE_CD moves mise too: refused with the plain -C form. env -C is followed.
+            self.check([f"MISE_CD={work} mise exec -- git push", f"env MISE_CD={work} mise exec -- git push",
+                        f"export MISE_CD={work}; mise exec -- git push", f"env -C {work} git push",
+                        f"MISE_CD={work} mise exec -- bash -c 'git push'", f"MISE_CD={work} mise x -c 'git push'",
+                        f"export MISE_CD={work}; mise exec -- bash -c 'git push'",
+                        f"env --chdir {work} git push", f"env --chdir={work} git push"], "deny")
+            self.check([f"cd {work} && env --unset FOO git push"], "deny")  # --unset takes its value
             git("switch", "-q", "-c", "feat/x", cwd=work)
             self.check(["git push", "git push origin HEAD", "git push -u origin feat/x"], None, cwd=str(work))
             self.check(["git push origin HEAD:trunk", "git push origin main"], "deny", cwd=str(work))
