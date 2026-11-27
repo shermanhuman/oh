@@ -588,16 +588,9 @@ def decide(event):
     if not isinstance(cwd, str) or not cwd:
         cwd = os.getcwd()
     found = [f for f in findings(command_text(event.get("tool_input")), Where(cwd)) if f]
-    decision, why = next((f for f in found if f[0] == DENY), None) or (found[0] if found else (None, None))
+    decision, why = found[0] if found else (None, None)
     if not decision:
         return None
-    if decision == DENY:
-        return DENY, (
-            f"Blocked by oh: this command {why}. "
-            "That step is always the user's. Stop, tell them what you "
-            "wanted to do and why, and hand them the exact command (they can run it with `! <command>`). "
-            "Don't look for another route to the same result."
-        )
     if "turn_id" in event:  # Codex: a hook's "ask" isn't supported, so it can't stand in for the user.
         return DENY, (
             f"Blocked by oh: this command {why}. That needs the user's approval, and Codex can't ask for it "

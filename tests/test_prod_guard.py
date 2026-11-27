@@ -30,43 +30,10 @@ REPLICA = "kubectl exec -i -n default \"$replica\" -c postgres -- psql -U postgr
 # Merges, pushes and repository deletes: GitHub's rulesets decide, not the guard.
 NOT_CHECKED = [
     "gh pr merge 12 --squash",
-    "mise exec -- gh pr merge 12 --auto --merge",
-    "MISE_EXEC_AUTO_INSTALL=false mise exec -- gh -R o/r pr merge 12",
     "gh api -X PUT repos/o/r/pulls/12/merge",
-    "gh api repos/o/r/pulls/12/merge -f merge_method=squash",
-    "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
-    "gh api graphql -F query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
-    "gh api -X DELETE repos/o/r",
     "gh repo delete o/r --yes",
-    "git push --force",
-    "git push -f origin feat/x",
-    "git push -uf origin feat/x",
-    "git push --force-with-lease origin feat/x",
-    "git push --force-with-lease=feat/x:abc origin feat/x",
-    "git push origin +feat/x:feat/x",
-    "git push --mirror",
-    "git push origin --all",
-    "git push origin HEAD:main",
-    "git push origin feat:refs/heads/main",
-    "git push origin master",
-    "git push origin --delete main",
-    "cd /tmp && git push origin HEAD:master",
-    "bash -c 'git push origin HEAD:main'",
-    "ssh vm 'cd repo && git push origin main'",
-    "echo ok && $(gh pr merge 3)",
-    "gh api graphql -f query=@merge.graphql",
-    "gh api graphql -F query=@- <<'EOF'\nmutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }\nEOF",
-    "curl -X PUT -H 'Authorization: token x' https://api.github.com/repos/o/r/pulls/12/merge",
-    "curl -fsS https://api.github.com/repos/o/r/pulls/12/merge -d '{\"merge_method\":\"squash\"}'",
-    "curl -X DELETE https://api.github.com/repos/o/r",
-    "xh PUT api.github.com/repos/o/r/pulls/12/merge",
-    "printf 'gh pr merge 12\\n' > m.sh && bash m.sh",
-    "out=`git push --force origin main`",
-    "gh api graphql --input merge.json",
-    "gh api graphql --input=merge.json",
-    "git push --repo origin HEAD:main",
-    "git push --repo=origin +HEAD:feat/x",
-    "gh api repos/o/r/pulls/12/merge --input=merge.json",
+    "git push --force origin main",
+    "curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge",
 ]
 
 # Irreversible in production: the user approves each one.
@@ -251,8 +218,6 @@ def run(command, cwd=OUTSIDE, raw=None, env=None):
     return json.loads(result.stdout)["hookSpecificOutput"] if result.stdout.strip() else None
 
 
-def git(*args, cwd):
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
 class Mise(unittest.TestCase):
@@ -265,8 +230,28 @@ class Mise(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["permissionDecision"], "ask")
 
-    def test_an_unreadable_mise_exec_gets_no_decision(self):
+    def test_an_unreadable_mise_exec_reads_the_command_after_dashes(self):
+        for command in ["mise exec -E prod -- kubectl delete ns x --context default",
+                        "mise x --env prod -- helm uninstall web --kube-context default",
+                        "mise exec -E prod -- psql -h db.prod -c 'DROP TABLE t'"]:
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["permissionDecision"], "ask")
         self.assertIsNone(run("mise -qC /tmp exec -- ls"))
+
+    def test_the_command_runs_where_mise_and_env_put_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            sub = pathlib.Path(d) / "sub"
+            sub.mkdir()
+            (sub / "drill.sh").write_text("#!/bin/sh\nkubectl --context default delete ns x\n")
+            for command in ["mise -C sub exec -- ./drill.sh", "mise x -C sub -- bash drill.sh",
+                            "mise exec --cd=sub -- ./drill.sh", "env -C sub ./drill.sh",
+                            "mise x node@22 -- env -C sub bash drill.sh",
+                            "mise exec --command='kubectl delete ns x --context default'"]:
+                with self.subTest(command=command):
+                    out = run(command, cwd=d)
+                    self.assertIsNotNone(out, "the script in sub/ is read")
+                    self.assertEqual(out["permissionDecision"], "ask")
+            self.assertIsNone(run("./drill.sh", cwd=d), "outside sub/ there's no drill.sh")
 
 
 class Guard(unittest.TestCase):

@@ -271,7 +271,11 @@ def _walk(argv):
         elif mise_exec(argv, i):
             m = mise_exec(argv, i)
             if m.unreadable:
-                return [], dirs  # a mise exec the guard can't read: no decision
+                # Options the guard doesn't know: read the command after
+                # `--` (as oh 3.2 did), in the current directory; with no
+                # `--`, nothing it can name runs.
+                rest = argv[i:]
+                return (rest[rest.index("--") + 1:] if "--" in rest else []), dirs
             if m.dir is not None:
                 dirs.append(m.dir)
             if m.command is not None:
