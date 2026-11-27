@@ -174,28 +174,70 @@ def simple_commands(text):
     return [argv for argv in commands if argv], substs
 
 
-# mise's global options that take a value, before its subcommand.
-MISE_VALUE_OPTIONS = {"-C", "--cd", "-E", "--env", "-j", "--jobs", "--output"}
+# mise's options that take a value: global ones (before the subcommand), and
+# exec's own (after `exec` or `x`).
+MISE_GLOBAL_VALUE_OPTIONS = {"-C", "--cd", "-E", "--env", "-j", "--jobs", "--output", "-P", "--profile", "--log-level"}
+MISE_EXEC_VALUE_OPTIONS = {"-C", "--cd", "-c", "--command", "-j", "--jobs"}
 
 
-def mise_exec_at(argv, i):
-    """The index of `exec` or `x` in a mise command starting at i (global
-    options such as -C dir or -q may come first), or None."""
-    j = i + 1
+class MiseExec:
+    """One `mise [global options] exec|x [options] [tools] (-- argv | -c text)`.
+    The single place the guard reads a mise command: the directories it moves
+    into (-C, before or after exec), the global options to ask mise with, the
+    `-c` text it runs, and where the command after `--` starts."""
+
+    def __init__(self):
+        self.dirs, self.options, self.command, self.start = [], [], None, None
+
+
+def _option(argv, j, value_options):
+    """(name, value, next index) for the option at j, `--name=value` included."""
+    word = argv[j]
+    if word.startswith("--") and "=" in word:
+        name, value = word.split("=", 1)
+        return name, value, j + 1
+    if word in value_options:
+        return word, (argv[j + 1] if j + 1 < len(argv) else ""), j + 2
+    return word, None, j + 1
+
+
+def mise_exec(argv, i):
+    """The MiseExec for a mise command at argv[i], or None if it isn't exec."""
+    if os.path.basename(argv[i]) != "mise":
+        return None
+    m, j = MiseExec(), i + 1
     while j < len(argv) and argv[j].startswith("-") and argv[j] != "--":
-        j += 2 if argv[j] in MISE_VALUE_OPTIONS else 1
-    return j if j < len(argv) and argv[j] in ("exec", "x") else None
+        name, value, j = _option(argv, j, MISE_GLOBAL_VALUE_OPTIONS)
+        if name in ("-C", "--cd"):
+            m.dirs.append(value)
+        else:
+            m.options += [name] if value is None else [name, value]
+    if j >= len(argv) or argv[j] not in ("exec", "x"):
+        return None
+    j += 1
+    while j < len(argv) and argv[j] != "--":
+        if argv[j].startswith("-"):
+            name, value, j = _option(argv, j, MISE_EXEC_VALUE_OPTIONS)
+            if name in ("-C", "--cd"):
+                m.dirs.append(value)
+            elif name in ("-c", "--command"):
+                m.command = value
+        else:
+            j += 1  # a tool, such as gh@2
+    if j < len(argv) and m.command is None:
+        m.start = j + 1
+    return m
 
 
-def program(argv):
-    """Strip env assignments and wrapper commands; return the argv that runs."""
-    i = 0
+def _walk(argv):
+    """The argv that runs, and the directories mise moves it into on the way."""
+    i, dirs = 0, []
     while i < len(argv):
         word = argv[i]
         if ASSIGNMENT.match(word) or word in KEYWORDS:
             i += 1
         elif word == "command" and i + 1 < len(argv) and argv[i + 1] in ("-v", "-V"):
-            return ["which"] + argv[i + 2:]
+            return ["which"] + argv[i + 2:], dirs
         elif word in RUNNERS:
             value_options = RUNNERS[word]
             i += 1
@@ -203,12 +245,27 @@ def program(argv):
                 i += 2 if argv[i] in value_options else 1
             if word == "timeout" and i < len(argv):
                 i += 1
-        elif os.path.basename(word) == "mise" and mise_exec_at(argv, i) is not None:
-            rest = argv[mise_exec_at(argv, i) + 1:]
-            i = len(argv) - len(rest) + (rest.index("--") + 1 if "--" in rest else len(rest))
+        elif mise_exec(argv, i):
+            m = mise_exec(argv, i)
+            dirs += m.dirs
+            if m.command is not None:
+                return ["sh", "-c", m.command], dirs  # read like any shell's -c text
+            if m.start is None:
+                return [], dirs  # mise runs nothing without -- or -c
+            i = m.start
         else:
             break
-    return argv[i:]
+    return argv[i:], dirs
+
+
+def program(argv):
+    """Strip env assignments and wrapper commands; return the argv that runs."""
+    return _walk(argv)[0]
+
+
+def program_dirs(argv):
+    """The directories (in order) that mise's -C moves the program into."""
+    return _walk(argv)[1]
 
 
 def shell_script(arg, cwd):

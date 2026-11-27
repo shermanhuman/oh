@@ -278,7 +278,9 @@ class AgentMerge(unittest.TestCase):
         self.sugar.parent.mkdir(parents=True)
         self.sugar.write_bytes(b"\x7fELF sugar " + (b"# sugarhouse: merge-check" if sugar_checks else b"") + b"\n")
         line = "# sugarhouse: merge-check\n" if mark else ""
-        (self.wrapdir / "gh").write_text(f"#!/bin/sh\n# gh as the Sugarhouse GitHub App\n{line}exec '{self.sugar}' gh \"$@\"\n")
+        # setup-identity's form: shellQuote leaves a plain path unquoted.
+        quoted = f"'{self.sugar}'" if " " in str(self.sugar) else str(self.sugar)
+        (self.wrapdir / "gh").write_text(f"#!/bin/sh\n# gh as the Sugarhouse GitHub App\n{line}exec {quoted} gh \"$@\"\n")
         (self.wrapdir / "gh").chmod(0o755)
         self.mise_path(f"{self.wrapdir}:{self.realdir}")
 
@@ -287,8 +289,12 @@ class AgentMerge(unittest.TestCase):
         with Sugarhouse's conf.d entry, or a project config that puts another gh first."""
         (self.home / "mise-path").write_text(path)
         mise = self.realdir / "mise"
+        # A directory's own mise-path file stands for a project config there.
+        # Asked offline, so a missing pinned tool never waits on the network.
         mise.write_text("#!/bin/sh\n[ \"$*\" = \"env --json\" ] || [ \"$*\" = \"-q env --json\" ] || exit 2\n"
-                        f"printf '{{\"PATH\": \"%s\"}}' \"$(cat '{self.home}/mise-path')\"\n")
+                        "[ \"$MISE_OFFLINE\" = 1 ] || { echo 'not offline' >&2; exit 3; }\n"
+                        f"f='{self.home}/mise-path'; [ -f mise-path ] && f=mise-path\n"
+                        "printf '{\"PATH\": \"%s\"}' \"$(cat \"$f\")\"\n")
         mise.chmod(0o755)
 
     def decision(self, command, first=None):
@@ -355,6 +361,25 @@ class AgentMerge(unittest.TestCase):
         out = run(f"mise exec -- gh pr merge {URL} --squash", env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertIn("not Sugarhouse's wrapper", out["permissionDecisionReason"])
+
+    def test_mise_c_moves_the_check_into_that_directory(self):
+        self.wrap()
+        project = self.home / "project"
+        project.mkdir()
+        (project / "mise-path").write_text(f"{self.realdir}:{self.wrapdir}")  # its config puts the real gh first
+        for command in [f"mise -C {project} exec -- gh pr merge {URL} --squash",
+                        f"mise x -C {project} -- gh pr merge {URL} --squash",
+                        f"mise exec --cd={project} -- gh pr merge {URL} --squash"]:
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "deny")
+        self.assertIsNone(self.decision(f"mise -C {self.home} exec -- gh pr merge {URL} --squash"))
+
+    def test_mise_c_text_and_hidden_options_are_read(self):
+        for command in ["mise x -c 'gh pr merge 9 --admin'", "mise exec -c 'git push --force'",
+                        "mise exec --command='git push --force'", "mise -P prod exec -- git push --force",
+                        "mise --log-level debug x -- git push --force", "mise exec gh@2 -- gh pr merge 9"]:
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "deny")
 
     def test_global_mise_options_were_a_blind_spot(self):
         for command in ["mise -C /tmp exec -- git push --force", "mise -q x -- git push origin HEAD:main",
@@ -427,6 +452,8 @@ class Guard(unittest.TestCase):
             git("remote", "set-head", "origin", "trunk", cwd=work)
             self.check(["git push", "git push origin HEAD", "git push -u origin HEAD", "git push origin trunk"], "deny", cwd=str(work))
             self.check([f"git -C {work} push", f"cd {work} && git push"], "deny")
+            # mise's -C moves the command into the repository, before or after exec.
+            self.check([f"mise -C {work} exec -- git push", f"mise x -C {work} -- git push origin HEAD"], "deny")
             git("switch", "-q", "-c", "feat/x", cwd=work)
             self.check(["git push", "git push origin HEAD", "git push -u origin feat/x"], None, cwd=str(work))
             self.check(["git push origin HEAD:trunk", "git push origin main"], "deny", cwd=str(work))
