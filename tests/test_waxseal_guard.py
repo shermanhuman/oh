@@ -153,6 +153,14 @@ HOLES = [
     ("URL from a variable", 'NAME=projects/p/secrets/s/versions/1; curl -s "https://secretmanager.googleapis.com/v1/$NAME:access"', False),
     ("URL fed to xargs curl", "echo https://secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:access | xargs curl -s", False),
     ("here-string to bash -s after a stdin redirect", f"</dev/null bash -s <<< 'gcloud {ACCESS}'", True),
+    ("URL host built from a variable", "H=secret; curl -s https://${H}manager.googleapis.com/v1/projects/p/secrets/s/versions/1:access", False),
+    ("URL from a for-loop word", "for u in https://secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/1:access; do curl -s \"$u\"; done", False),
+    ("heredoc through tee in a pipe, then run", f"cat <<'EOF' | tee run.sh >/dev/null\ngcloud {ACCESS}\nEOF\nbash run.sh", True),
+    ("printf with escapes, then run", f"printf '#!/bin/sh\\ngcloud {ACCESS}\\n' > run; bash run", True),
+    ("echo -e with escapes, then run", f"echo -e '#!/bin/bash\\ngcloud {ACCESS}' > run.sh && bash run.sh", True),
+    ("heredoc to a mktemp path, then run", f"f=$(mktemp); cat > \"$f\" <<'EOF'\ngcloud {ACCESS}\nEOF\nbash \"$f\"", True),
+    ("a variable given two values", f"G=gcloud; $G {ACCESS}; G=echo", True),
+    ("setsid gcloud with a variable verb", "OP=destroy; setsid gcloud secrets versions $OP 3 --secret=x", True),
     ("trap string", "s=secrets; trap \"gcloud $s versions destroy 3 --secret=x\" EXIT", True),
 ]
 
@@ -162,6 +170,7 @@ UNSURE_DENIED = [
     "$CMD; gcloud secrets list",
     "bash <<< 'gcloud secrets list'",
     "cat <<EOF\ngcloud secrets list",
+    'bash "$SCRIPT"; gcloud secrets list',
 ]
 
 
@@ -270,6 +279,9 @@ ALLOWED = [
     "retry() { \"$@\" || \"$@\"; }; retry kubectl get secrets -n app",
     "G=/usr/lib/google-cloud-sdk/bin/gcloud; $G secrets versions list x",
     "gcloud secrets versions access --help",
+    "ssh ny1 true; git commit -m \"$(cat <<'EOF'\nguard: gcloud secrets versions access is refused\nEOF\n)\"",
+    "eval \"$(true)\"; gh pr comment 61 --body \"$(cat <<'EOF'\nrefuses gcloud secrets versions access\nEOF\n)\"",
+    'grep -rn secretmanager.googleapis.com docs/ ; curl -sI "$SITE"',
     "cp a.txt b.txt && $PY $S/check.py --secrets-only",
     "sed -i 's/a/b/' x.py && $V/bin/python -m unittest discover -s tests -k secrets",
     "$V - <<'EOF'\nfiles = [f for f in x if f'{f}' != 'secrets']\nprint({'a': 1})\nEOF",
@@ -282,7 +294,6 @@ NOT_COVERED = [
     "python3 - <<EOF\nimport subprocess; subprocess.run(['gcloud', 'secrets', 'versions', 'access', 'latest'])\nEOF",
     "python3 -c \"import subprocess; subprocess.run(['gcloud','secrets','versions','access','latest'])\"",
     "mapfile -C 'gcloud secrets versions access latest --secret=x #' -c 1 < /etc/hostname",
-    "H=secret; curl https://${H}manager.googleapis.com/v1/projects/p/secrets/s/versions/1:access",
     "gcloud $(cat args.txt)",
     "xargs -a args.txt gcloud",
     "a=destroy; x=/secrets; gcloud ${x#/} versions $a 3 --secret=x",
@@ -398,6 +409,13 @@ class Guard(unittest.TestCase):
                 with self.subTest(command=command):
                     self.assertIsNotNone(run(command, cwd=d))
             self.assertIsNone(run("bash ok.sh", cwd=d))
+            (root / "run.sh").write_text("gcloud secrets versions destroy 3 --secret=x\n")
+            for command in ["echo 'echo done' >> run.sh && bash run.sh", "(cd sub && ls) && bash run.sh", "up() { cd sub; }; bash run.sh",
+                            "cat > run.sh <<'EOF'\necho hi\nEOF\nbash run.sh"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
+            (root / "rc").write_text("eval \"$(mise activate bash)\"\nalias ll='ls -l'\n")
+            self.assertIsNone(run("source ./rc; kubectl get secrets -n app", cwd=d))
             self.assertIsNone(run("cd sub && bash ok.sh && kubectl get secrets -n app", cwd=d))
             self.assertIsNone(run("bash < ok.sh; kubectl get secrets -n app", cwd=d))
             # A script that can't be read, in a command that mentions Secret Manager, is refused.

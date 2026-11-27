@@ -456,6 +456,7 @@ def lex_exact(text, marks=None):
                 word.clear()
                 state["started"] = state["expanded"] = False
             end_word(i)
+            marks.append(("op", i, op))
             if op in ("<<", "<<-"):
                 marks.append(("<<", i))
             out.append(("op", op))
