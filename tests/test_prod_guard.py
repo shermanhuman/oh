@@ -259,58 +259,79 @@ URL = "https://github.com/Applesauce-Labs/sugarhouse/pull/9"
 
 
 class AgentMerge(unittest.TestCase):
-    """Sugarhouse decision 96: the agent's squash into rc or hotfix, through the wrapper."""
+    """Sugarhouse decision 96: the agent's squash into rc or hotfix, through a wrapper that checks it."""
 
     def setUp(self):
         self.home = pathlib.Path(tempfile.mkdtemp(prefix="agent-merge-"))
         self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
         (self.home / ".kube").mkdir()
         (self.home / ".kube/config").write_text("apiVersion: v1\ncontexts: []\n")
+        self.wrapdir = self.home / ".local/share/sugarhouse/wrap"
+        self.realdir = self.home / "real"
+        self.realdir.mkdir()
+        (self.realdir / "gh").write_bytes(b"\x7fELF fake binary\n")
+        (self.realdir / "gh").chmod(0o755)
 
-    def wrap(self):
-        w = self.home / ".local/share/sugarhouse/wrap"
-        w.mkdir(parents=True)
-        (w / "gh").write_text("#!/bin/sh\n")
+    def wrap(self, checks=True):
+        self.wrapdir.mkdir(parents=True)
+        mark = "# sugarhouse: merge-check\n" if checks else ""
+        (self.wrapdir / "gh").write_text(f"#!/bin/sh\n# gh as the Sugarhouse GitHub App\n{mark}exec sugar gh \"$@\"\n")
+        (self.wrapdir / "gh").chmod(0o755)
+        conf = self.home / ".config/mise/conf.d"
+        conf.mkdir(parents=True)
+        (conf / "sugarhouse.toml").write_text(f"[env]\n_.path = [\"{self.wrapdir}\"]\n")
 
-    def decision(self, command):
-        out = run(command, env={"HOME": str(self.home)})
+    def decision(self, command, first=None):
+        path = f"{first or self.realdir}:/usr/bin:/bin"
+        out = run(command, env={"HOME": str(self.home), "PATH": path})
         return out and out["permissionDecision"]
 
     def test_the_allowed_form(self):
         self.wrap()
-        for command in [
-            f"gh pr merge {URL} --squash",
-            f"gh pr merge {URL} -s -d --match-head-commit abc",
-            f"mise exec -- gh pr merge {URL} --squash --subject 'feat: x'",
-            f"~/.local/share/sugarhouse/bin/sugar gh pr merge {URL} --squash",
+        for command, first in [
+            (f"gh pr merge {URL} --squash", self.wrapdir),
+            (f"gh pr merge {URL} -s -d --match-head-commit abc", self.wrapdir),
+            (f"mise exec -- gh pr merge {URL} --squash --subject 'feat: x'", None),
+            (f"~/.local/share/sugarhouse/bin/sugar gh pr merge {URL} --squash", None),
+            (f"~/.local/share/sugarhouse/wrap/gh pr merge {URL} --squash", None),
+            (f"{self.wrapdir}/gh pr merge {URL} --squash", None),
         ]:
             with self.subTest(command=command):
-                self.assertIsNone(self.decision(command))
+                self.assertIsNone(self.decision(command, first))
 
     def test_everything_else_is_denied(self):
         self.wrap()
         for command in [
-            "gh pr merge 9 --squash",                          # no URL
-            f"gh pr merge --squash {URL}",                     # the URL isn't straight after merge
-            f"gh pr merge {URL}",                              # no --squash
-            f"gh pr merge {URL} --squash --merge",
-            f"gh pr merge {URL} --squash --admin",
-            f"gh pr merge {URL} --squash --auto",
-            f"gh pr merge {URL} --squash -R o/r",
-            f"gh -R o/r pr merge {URL} --squash",
-            f"gh pr merge {URL} --squash --repo=o/r",
-            f"gh pr merge https://github.com/o/r/issues/9 --squash",
+            "mise exec -- gh pr merge 9 --squash",                  # no URL
+            f"mise exec -- gh pr merge --squash {URL}",             # the URL isn't straight after merge
+            f"mise exec -- gh pr merge {URL}",                      # no --squash
+            f"mise exec -- gh pr merge https://github.com/o/r/issues/9 --squash",
             f"~/.local/share/sugarhouse/bin/sugar gh --as-owner pr merge {URL} --squash",
+            f"~/.local/share/sugarhouse/bin/sugar gh pr merge {URL} --squash --as-owner",
+            f"~/.local/share/sugarhouse/wrap/gh --as-owner pr merge {URL} --squash",
+            f"{self.wrapdir}/gh --as-owner pr merge {URL} --squash",  # by absolute path, a script
+            f"{self.realdir}/gh pr merge {URL} --squash",           # the real gh by path
+            f"gh pr merge {URL} --squash",                          # the real gh is first on PATH
             f"ssh vm 'gh pr merge {URL} --squash'",
-            "gh api -X PUT repos/o/r/pulls/9/merge",
+            "mise exec -- gh api -X PUT repos/o/r/pulls/9/merge",
         ]:
             with self.subTest(command=command):
                 self.assertEqual(self.decision(command), "deny")
 
+    def test_a_wrapper_that_does_not_check_merges_is_denied(self):
+        self.wrap(checks=False)
+        for command in [f"mise exec -- gh pr merge {URL} --squash",
+                        f"~/.local/share/sugarhouse/bin/sugar gh pr merge {URL} --squash"]:
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command, self.wrapdir), "deny")
+
     def test_without_the_wrapper_it_is_denied(self):
-        self.assertEqual(self.decision(f"gh pr merge {URL} --squash"), "deny")
-        # sugar gh is the wrapper itself.
-        self.assertIsNone(self.decision(f"~/.local/share/sugarhouse/bin/sugar gh pr merge {URL} --squash"))
+        self.assertEqual(self.decision(f"mise exec -- gh pr merge {URL} --squash"), "deny")
+        self.assertEqual(self.decision(f"~/.local/share/sugarhouse/bin/sugar gh pr merge {URL} --squash"), "deny")
+
+    def test_a_denied_merge_names_the_allowed_form(self):
+        out = run("gh pr merge 9 --squash", env={"HOME": str(self.home)})
+        self.assertIn("--squash` through Sugarhouse's wrapper", out["permissionDecisionReason"])
 
 
 class Guard(unittest.TestCase):
