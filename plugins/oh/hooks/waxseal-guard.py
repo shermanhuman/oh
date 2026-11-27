@@ -103,8 +103,12 @@ DEPTH = 4
 # `cd` target, and everything written to a file (by the path as spelled and as resolved). These
 # only ever add readings: a script is read from each candidate, the disk included, and any that
 # refuses refuses the command (round 5's step-back).
-STATE = {"vars": {}, "cwds": [], "written": {}, "host": False}
-MAX_CANDIDATES = 16
+STATE = {"vars": {}, "cwds": [], "written": {}, "host": False, "cut": False, "read": set()}
+MAX_CANDIDATES = 64  # past this a candidate list is cut, and a cut list counts as unsure (`STATE["cut"]`)
+
+
+class Deadline(BaseException):
+    """The guard ran past TIME_LIMIT. Not an OSError or Exception, so no file read swallows it."""
 TIME_LIMIT = 5  # seconds; the hook's own timeout is 10, and a killed guard lets the command run
 
 KUBESEAL = "runs kubeseal"
@@ -340,6 +344,8 @@ def argv_reason(argv, cwd, depth, mentioned, nested=True):
         return None
     name = os.path.basename(argv[0])
     args = argv[1:]
+    if isinstance(argv[0], Expanded) and any(k in STATE["written"] for k in [spelled(argv[0]), *resolve(argv[0], cwd)]):
+        return script_reason(argv[0], cwd, depth, mentioned)  # `f=$(mktemp); cat > "$f" <<EOF …; "$f"`
     known = re.fullmatch(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", str(argv[0])) if isinstance(argv[0], Expanded) else None
     values = STATE["vars"].get(known.group(1), []) if known else []
     if values:
@@ -373,35 +379,14 @@ def argv_reason(argv, cwd, depth, mentioned, nested=True):
     return None
 
 
-def resolve(word, cwd):
-    """Every path a word may name: `~` expanded, each literal value this command assigns to a
-    variable in it, against the event's directory and every `cd` target. Empty when it holds
-    an expansion the guard can't follow."""
-    texts = [str(word)]
-    for _ in range(4):
-        grown = []
-        for text in texts:
-            m = re.search(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", text)
-            values = STATE["vars"].get(m.group(1) or m.group(2)) if m else None
-            if m and values:
-                grown += [text[:m.start()] + v + text[m.end():] for v in values]
-            else:
-                grown.append(text)
-        texts = grown[:MAX_CANDIDATES]
-    paths = []
-    for text in texts:
-        if "$" in text or "`" in text:
-            continue
-        path = pathlib.Path(os.path.expanduser(text))
-        for here in ([] if path.is_absolute() else [cwd, *STATE["cwds"]]) or [None]:
-            full = str(path if here is None else pathlib.Path(here) / path)
-            if full not in paths:
-                paths.append(full)
-    return paths[:MAX_CANDIDATES]
+def spelled(word):
+    """A word's spelling with `${NAME}` written as `$NAME`, so `${f}` and `$f` are one key."""
+    return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}(?![A-Za-z0-9_])", r"$\1", str(word))
 
 
-def expand(word):
-    """Every text a word may become from the literal values this command assigns."""
+def substitute(word):
+    """Every text a word may become from the literal values this command assigns (`STATE["cut"]`
+    is set when the list had to be cut)."""
     texts = [str(word)]
     for _ in range(4):
         grown = []
@@ -409,13 +394,38 @@ def expand(word):
             m = re.search(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?\}|\$([A-Za-z_][A-Za-z0-9_]*)", text)
             values = STATE["vars"].get(m.group(1) or m.group(2)) if m else None
             grown += [text[:m.start()] + v + text[m.end():] for v in values] if values else [text]
-        texts = grown[:MAX_CANDIDATES]
-    return [t for t in texts if t != str(word)]
+        if len(grown) > MAX_CANDIDATES:
+            STATE["cut"] = True
+        texts = list(dict.fromkeys(grown))[:MAX_CANDIDATES]
+    return texts
+
+
+def resolve(word, cwd):
+    """Every path a word may name: `~` expanded, each literal value this command assigns to a
+    variable in it, against the event's directory and each directory the command `cd`s into.
+    Empty when it holds an expansion the guard can't follow."""
+    paths = []
+    for text in substitute(word):
+        if "$" in text or "`" in text:
+            continue
+        path = pathlib.Path(os.path.expanduser(text))
+        for here in ([] if path.is_absolute() else [cwd, *STATE["cwds"]]) or [None]:
+            full = os.path.normpath(str(path if here is None else pathlib.Path(here) / path))
+            if full not in paths:
+                paths.append(full)
+    if len(paths) > MAX_CANDIDATES:
+        STATE["cut"] = True
+    return paths[:MAX_CANDIDATES]
+
+
+def expand(word):
+    """Every other text a word may become from the literal values this command assigns."""
+    return [t for t in substitute(word) if t != str(word)]
 
 
 def write(target, body, cwd):
     """Remember what this command writes to target, by spelling and by every resolved path."""
-    for key in [str(target), *resolve(target, cwd)]:
+    for key in [spelled(target), *resolve(target, cwd)]:
         STATE["written"].setdefault(key, []).append(body)
 
 
@@ -427,14 +437,17 @@ def script_reason(script, cwd, depth, mentioned):
         return None
     paths = resolve(script, cwd)
     # A file is judged on what it says: the command's own mention doesn't make a `.bashrc` unsure.
-    readings = [(cwd, body) for key in [str(script), *paths] for body in STATE["written"].get(key, [])]
+    readings = [(cwd, body) for key in [spelled(script), *paths] for body in STATE["written"].get(key, [])]
     for path in paths:
         _, text = shell.read_script(path, cwd)
         if text is not None:
             readings.append((str(pathlib.Path(path).parent), text))
-    if not readings:
-        return UNSURE if mentioned else None
+    if (not readings or STATE["cut"]) and mentioned:
+        return UNSURE
     for here, text in readings:
+        if text in STATE["read"]:
+            continue  # each distinct script is judged once per decision
+        STATE["read"].add(text)
         why = reason_for(text, here, depth + 1)
         if why:
             return why
@@ -467,7 +480,7 @@ def first_reason(argv, name, args, cwd, depth, mentioned, fed=False):
         string = string_runner(name, args)
         if string is not None:
             return reason_for(string, cwd, depth + 1, mentioned)
-    if "/" in argv[0] and any(k in STATE["written"] for k in [str(argv[0]), *resolve(argv[0], cwd)]):
+    if any(k in STATE["written"] for k in [spelled(argv[0]), *resolve(argv[0], cwd)]):
         return script_reason(argv[0], cwd, depth, mentioned)  # `cat > run <<EOF … EOF; ./run`, disk too
     if "/" in argv[0] and name not in NESTED | {"kubeseal"}:  # not gcloud's own wrapper script
         for candidate in resolve(argv[0], cwd) or [str(argv[0])]:
@@ -538,6 +551,8 @@ def code_string(before):
     if inner == before:
         return False
     outer = before[:len(before) - len(inner)]
+    if outer.endswith("$("):
+        outer = innermost(outer[:-2])  # `out=$(ssh host "$(cat <<'EOF'`: the command holding the `$(`
     marks = []
     try:
         shell.lex_exact(outer, marks)
@@ -633,10 +648,28 @@ def reason_for(text, cwd, depth=0, mentioned=False):
         run = unwrap(argv)
         if len(argv) > 2 and argv[0] == "for" and argv[2] == "in":  # `for u in A B; do …`
             STATE["vars"].setdefault(str(argv[1]), []).extend(str(w) for w in argv[3:])
+        target_word = None
+        if run and run[0] in ("cd", "pushd") and len(run) > 1:
+            target_word = run[1]
+        elif "env" in [os.path.basename(w) for w in argv]:
+            target_word = next((argv[k + 1] for k in range(len(argv) - 1) if argv[k] in ("-C", "--chdir")), None)
+        if target_word is not None and re.fullmatch(r"\$\(git rev-parse --show-toplevel[^)]*\)", str(target_word).strip('"')):
+            top = next((d for d in (pathlib.Path(cwd), *pathlib.Path(cwd).parents) if (d / ".git").exists()), None)
+            target_word = str(top) if top else None  # `cd "$(git rev-parse --show-toplevel)"`
+        if target_word is not None:
+            run = ["cd", target_word]
         if run and run[0] == "cd" and len(run) > 1:
-            for target in resolve(run[1], cwd):
+            # Each `cd` from where the walk so far stands (bash's order); the event's directory and
+            # every earlier stop stay candidates too, for a `cd` inside `( … )` or a function.
+            base = STATE["cwds"][-1] if STATE["cwds"] else cwd
+            saved, STATE["cwds"] = STATE["cwds"], []
+            targets = resolve(run[1], base)
+            STATE["cwds"] = saved
+            for target in targets[:1]:
                 if target not in STATE["cwds"]:
                     STATE["cwds"].append(target)
+            if len(STATE["cwds"]) > MAX_CANDIDATES:
+                STATE["cut"], STATE["cwds"] = True, STATE["cwds"][-MAX_CANDIDATES:]
     for header, start, end, body, quoted in docs:
         why = heredoc_reason(header, start, end, body, cwd, depth, mentioned)
         if why:
@@ -729,7 +762,7 @@ def decide(event):
     if exempt(cwd):
         return None
     text = command_text(event.get("tool_input"))
-    STATE.update(vars={}, cwds=[], written={}, host=False)
+    STATE.update(vars={}, cwds=[], written={}, host=False, cut=False, read=set())
     why = reason_for(text, cwd)
     if not why:
         return None
@@ -751,7 +784,7 @@ def message_for(why):
 
 
 def timed_out(signum, frame):
-    raise TimeoutError(f"took over {TIME_LIMIT} seconds")
+    raise Deadline(f"took over {TIME_LIMIT} seconds")
 
 
 def main():
@@ -761,7 +794,7 @@ def main():
         signal.alarm(TIME_LIMIT)
         message = decide(json.loads(raw))
         signal.alarm(0)
-    except Exception as error:
+    except (Exception, Deadline) as error:
         signal.alarm(0)
         # Fail open, but say so; fail closed when the text mentions Secret Manager.
         print(f"waxseal-guard: skipped ({type(error).__name__}: {error})", file=sys.stderr)

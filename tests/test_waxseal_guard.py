@@ -161,6 +161,9 @@ HOLES = [
     ("heredoc to a mktemp path, then run", f"f=$(mktemp); cat > \"$f\" <<'EOF'\ngcloud {ACCESS}\nEOF\nbash \"$f\"", True),
     ("a variable given two values", f"G=gcloud; $G {ACCESS}; G=echo", True),
     ("setsid gcloud with a variable verb", "OP=destroy; setsid gcloud secrets versions $OP 3 --secret=x", True),
+    ("written temp script run directly", f"f=$(mktemp); cat > \"$f\" <<'EOF'\ngcloud {ACCESS}\nEOF\nchmod +x \"$f\"; \"$f\"", True),
+    ("written temp script, braces in the run", f"f=$(mktemp); cat > \"$f\" <<'EOF'\ngcloud {ACCESS}\nEOF\nbash ${{f}}", True),
+    ("heredoc two substitutions deep in ssh", f"out=$(ssh host \"$(cat <<'EOF'\ngcloud {ACCESS}\nEOF\n)\")", False),
     ("trap string", "s=secrets; trap \"gcloud $s versions destroy 3 --secret=x\" EXIT", True),
 ]
 
@@ -414,6 +417,13 @@ class Guard(unittest.TestCase):
                             "cat > run.sh <<'EOF'\necho hi\nEOF\nbash run.sh"]:
                 with self.subTest(command=command):
                     self.assertIsNotNone(run(command, cwd=d))
+            deep = root / "a" / "b" / "c" / "d" / "e"
+            deep.mkdir(parents=True)
+            (deep / "deep.sh").write_text("gcloud secrets versions destroy 3 --secret=x\n")
+            for command in ["cd a && cd b && cd c && cd d && cd e && bash deep.sh", "pushd sub >/dev/null && bash plain; popd",
+                            "env -C sub bash plain", "cd a/b/c/d/e; cd ..; cd e; bash deep.sh"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
             (root / "rc").write_text("eval \"$(mise activate bash)\"\nalias ll='ls -l'\n")
             self.assertIsNone(run("source ./rc; kubectl get secrets -n app", cwd=d))
             self.assertIsNone(run("cd sub && bash ok.sh && kubectl get secrets -n app", cwd=d))
@@ -450,6 +460,16 @@ class Guard(unittest.TestCase):
                 out = run(command)
                 self.assertLess(time.monotonic() - start, 4)
                 self.assertIsNotNone(out)
+
+    def test_deadline_is_not_swallowed(self):
+        """The deadline must not be an OSError or Exception, or `except OSError` around a file read
+        would swallow it and the guard would run past the hook's own timeout."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("guard_under_test", GUARD)
+        guard = importlib.util.module_from_spec(spec)
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(guard)
+        self.assertFalse(issubclass(guard.Deadline, Exception))
 
     def test_bad_input_passes(self):
         self.assertIsNone(run(None, raw="not json"))
