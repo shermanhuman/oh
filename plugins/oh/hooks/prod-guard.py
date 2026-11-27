@@ -651,6 +651,11 @@ def argv_findings(argv, where, depth):
         return
     for d in shell.program_dirs(argv):  # `mise -C dir exec -- ...` runs in dir
         where = where.but(cwd=where.path(d))
+    # MISE_CD moves mise like -C, from the command's variables or an earlier
+    # export: the plain form is -C, which the guard follows. Checked before
+    # anything below can return (a shell, -c text, a script).
+    if ("MISE_CD" in env or "MISE_CD" in where.env) and any(shell.mise_exec(argv, i) for i in range(len(argv))):
+        run = [shell.MISE_UNREADABLE] + run
     name, args = os.path.basename(run[0]), run[1:]
     # A child shell inherits the command's variables (`PGHOST=x bash -c ...`), and a
     # script runs in the caller's directory, not its own.
@@ -675,11 +680,6 @@ def argv_findings(argv, where, depth):
         if text:
             yield from findings(text, child, depth + 1)
             return
-    # MISE_CD moves mise like -C, from the command's variables or an earlier
-    # export: the plain form is -C, which the guard follows.
-    moved = "MISE_CD" in env or "MISE_CD" in where.env
-    if moved and any(shell.mise_exec(argv, i) for i in range(len(argv))):
-        run = [shell.MISE_UNREADABLE] + run
     if run[0] == shell.MISE_UNREADABLE:
         yield DENY, ("runs a `mise exec` the guard can't read (an option other than -C, -q, -y, -v or -c, a "
                      "joined form such as -qC or -Cdir, or MISE_CD). Write it plainly, `mise exec -- <command>` or "

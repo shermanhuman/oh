@@ -21,7 +21,7 @@ KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}",
 # Words that run the rest of the line as a command, and their options that take a value.
 RUNNERS = {
     "sudo": {"-u", "-g", "-U", "-C", "-D", "-h", "-p", "-r", "-t", "-T"},
-    "env": {"-u", "-C", "-S"},
+    "env": {"-u", "-C", "-S", "--chdir", "--unset"},
     "timeout": {"-s", "-k", "--signal", "--kill-after"},
     "nice": {"-n"},
     "xargs": {"-I", "-n", "-P", "-L", "-d", "-s", "-E", "-a"},

@@ -489,7 +489,10 @@ class Guard(unittest.TestCase):
             self.check([f"mise -C /tmp exec -C {work} -- git push"], "deny")
             # MISE_CD moves mise too: refused with the plain -C form. env -C is followed.
             self.check([f"MISE_CD={work} mise exec -- git push", f"env MISE_CD={work} mise exec -- git push",
-                        f"export MISE_CD={work}; mise exec -- git push", f"env -C {work} git push"], "deny")
+                        f"export MISE_CD={work}; mise exec -- git push", f"env -C {work} git push",
+                        f"MISE_CD={work} mise exec -- bash -c 'git push'", f"MISE_CD={work} mise x -c 'git push'",
+                        f"export MISE_CD={work}; mise exec -- bash -c 'git push'",
+                        f"env --chdir {work} git push", f"env --chdir={work} git push"], "deny")
             git("switch", "-q", "-c", "feat/x", cwd=work)
             self.check(["git push", "git push origin HEAD", "git push -u origin feat/x"], None, cwd=str(work))
             self.check(["git push origin HEAD:trunk", "git push origin main"], "deny", cwd=str(work))
