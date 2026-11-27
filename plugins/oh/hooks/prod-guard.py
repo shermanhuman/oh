@@ -6,20 +6,8 @@ or rollout restarts, Argo refreshes, migration Jobs and deploy scripts)
 goes ahead without asking, except a destructive change inside it. It looks
 only at what a shell would execute, using the parser in shell.py.
 
-Allowed, the one merge an agent makes itself (Sugarhouse's decision 96):
-`mise exec -- gh pr merge <full PR URL> --squash`, where Sugarhouse's mise
-entry makes gh its wrapper, which asks the board and refuses anything but a
-green squash into rc or hotfix (other methods, --admin, --auto and -R
-included). The wrapper must carry the merge-check mark and the sugar it runs
-must hold it, so an older or rolled-back sugar is denied. Bare gh, the
-wrapper or the real gh by path, `sugar gh`, `--as-owner` and ssh are denied.
-
-Denied, because they are always the user's step:
-- any other `gh pr merge`, `gh api` merging a pull request (REST PUT or a GraphQL
-  merge/auto-merge mutation), `gh repo delete` and `gh api -X DELETE repos/o/r`;
-- `git push` that forces (`--force`, `-f`, `--force-with-lease`, a `+refspec`),
-  pushes every branch (`--mirror`, `--all`), or lands on the default branch
-  (origin/HEAD, plus main and master).
+Merges, pushes and repository deletes aren't checked here: GitHub's rulesets
+decide who may merge and push where (the owner's decision, 2026-11-27).
 
 Asked, so the user approves with one key:
 - `kubectl delete`, `drain`, `cordon` and `scale --replicas=0`, and
@@ -48,8 +36,6 @@ import json
 import os
 import pathlib
 import re
-import shutil
-import subprocess
 import sys
 
 
@@ -73,12 +59,7 @@ DENY, ASK = "deny", "ask"
 DEPTH = 4
 LOCAL_CONTEXT = re.compile(r"(kind|k3d)-.+|minikube|docker-desktop|orbstack|rancher-desktop")
 LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
-DEFAULT_BRANCHES = {"main", "master"}
 CURRENT_CONTEXT = re.compile(r"^current-context:\s*[\"']?([^\s\"']+)", re.M)
-MERGE_MUTATION = re.compile(r"\b(mergePullRequest|enablePullRequestAutoMerge)\b")
-GITHUB_API = re.compile(r"api\.github\.com/(repos/[^/\s?#]+/[^/\s?#]+(?:/pulls/[^/\s?#]+/merge)?)/?(?:[?#\s]|$)")
-NETWORK = {"curl", "wget", "http", "https", "xh"}
-HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 
 KUBECTL_VALUE_OPTIONS = {
     "-n", "--namespace", "--context", "--kubeconfig", "--cluster", "--user", "-s", "--server", "--token",
@@ -90,13 +71,6 @@ HELM_VALUE_OPTIONS = {
     "-n", "--namespace", "--kube-context", "--kubeconfig", "--kube-apiserver", "--kube-as-user",
     "--kube-as-group", "--kube-token", "--kube-ca-file", "--repository-config", "--repository-cache",
     "--registry-config", "--burst-limit", "--qps",
-}
-GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
-PUSH_VALUE_OPTIONS = {"--repo", "-o", "--push-option", "--receive-pack", "--exec"}
-GH_VALUE_OPTIONS = {"-R", "--repo"}
-GH_API_VALUE_OPTIONS = {
-    "-X", "--method", "-H", "--header", "-f", "--raw-field", "-F", "--field", "--input", "-q", "--jq",
-    "-t", "--template", "--hostname", "-p", "--preview", "--cache",
 }
 PSQL_VALUE_OPTIONS = {
     "-c", "--command", "-d", "--dbname", "-f", "--file", "-h", "--host", "-p", "--port", "-U", "--username",
@@ -253,198 +227,6 @@ def helm_finding(args, where, env):
     if is_local(context):
         return None
     return ASK, f"runs `helm uninstall` on {describe(context)}"
-
-
-def git(repo, *args):
-    try:
-        result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=2)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def git_finding(args, where):
-    repo, i = pathlib.Path(where.cwd), 0
-    while i < len(args) and args[i].startswith("-"):
-        if args[i] == "-C" and i + 1 < len(args):
-            repo = repo / args[i + 1]
-        i += 2 if args[i] in GIT_VALUE_OPTIONS else 1
-    if args[i:i + 1] != ["push"]:
-        return None
-    rest = args[i + 1:]
-    flags = [arg for arg in rest if arg.startswith("-")]
-    if any(arg == "--dry-run" or re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", arg) for arg in flags):
-        return None
-    if any(
-        arg in ("--force", "--force-with-lease") or arg.startswith("--force-with-lease=")
-        or re.fullmatch(r"-[a-zA-Z]*f[a-zA-Z]*", arg)
-        for arg in flags
-    ):
-        return DENY, "force-pushes"
-    if any(arg in ("--mirror", "--all", "--branches") for arg in flags):
-        return DENY, "pushes every branch"
-    words = positionals(rest, PUSH_VALUE_OPTIONS)
-    named = option(rest, "--repo")
-    remote, refspecs = (named, words) if named else ((words[0] if words else "origin"), words[1:])
-    if any(spec.startswith("+") for spec in refspecs):
-        return DENY, "force-pushes"
-    defaults = set(DEFAULT_BRANCHES)
-    targets = []
-    if not where.remote:
-        head = git(repo, "symbolic-ref", "-q", "--short", f"refs/remotes/{remote}/HEAD")
-        if head:
-            defaults.add(head.split("/", 1)[-1])
-    for spec in refspecs or ([] if "--tags" in flags else ["HEAD"]):
-        source, colon, destination = spec.partition(":")
-        target = destination if colon else source
-        if target == "HEAD":
-            if where.remote:
-                continue
-            target = git(repo, "symbolic-ref", "-q", "--short", "HEAD") or ""
-            if not refspecs and git(repo, "config", "push.default") in ("upstream", "tracking"):
-                upstream = git(repo, "rev-parse", "--abbrev-ref", "@{upstream}") or ""
-                targets.append(upstream.split("/", 1)[-1])
-        targets.append(target.removeprefix("refs/heads/"))
-    hit = next((t for t in targets if t in defaults), None)
-    return (DENY, f"pushes to the default branch `{hit}`") if hit else None
-
-
-PR_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+/?")
-# In a sugar whose `gh` checks merges with the board (sugarhouse#128 and
-# later): its binary holds the string, and the wrapper it writes carries it.
-MERGE_CHECK_MARK = "# sugarhouse: merge-check"
-AGENT_MERGE = ("The one merge an agent makes itself is `mise exec -- gh pr merge <full PR URL> --squash` "
-               "through Sugarhouse's wrapper, into rc or hotfix; any other merge is the user's. ")
-
-
-def sugarhouse_home():
-    return pathlib.Path(os.environ.get("HOME") or pathlib.Path.home())
-
-
-def wrapper_path():
-    return sugarhouse_home() / ".local/share/sugarhouse/wrap/gh"
-
-
-def is_wrapper(word, where):
-    """A gh given by path that is Sugarhouse's wrapper, or a link to it."""
-    path = pathlib.Path(os.path.expanduser(word))
-    if not path.is_absolute():
-        path = pathlib.Path(where.cwd) / path
-    try:
-        return path.resolve() == wrapper_path().resolve()
-    except OSError:
-        return False
-
-
-def checked_merge(argv, run, where):
-    """None when this `pr merge` runs through a wrapper that checks it with the
-    board, else what's missing. Only `mise exec -- gh`: mise itself is asked
-    which gh it will run (in the command's directory and environment), the
-    wrapper must carry the mark, and the sugar binary it runs must hold it,
-    so an older or rolled-back sugar is denied."""
-    found_mise = next(((i, shell.mise_exec(argv, i)) for i in range(len(argv)) if shell.mise_exec(argv, i)), None)
-    if where.remote or run[0] != "gh" or not found_mise:
-        return "it isn't `mise exec -- gh`"
-    at, m = found_mise
-    if m.unreadable or m.start is None or argv[m.start:] != run:
-        return "it isn't `mise exec -- gh`"
-    wrap = wrapper_path()
-    try:
-        text = wrap.read_text(errors="ignore")
-    except OSError:
-        return "Sugarhouse's gh wrapper isn't installed (`sugar setup-identity`)"
-    if MERGE_CHECK_MARK not in text:
-        return "the wrapper predates the merge check: install a sugarhouse release with the merge check (sugarhouse#128) and run `sugar setup-identity`"
-    target = re.search(r"^exec\s+('(?:[^']|'\\'')*'|\S+)\s+gh\b", text, re.M)
-    if not target:
-        return "the wrapper doesn't say which sugar it runs"
-    sugar = target.group(1)
-    if sugar.startswith("'"):
-        sugar = sugar[1:-1].replace("'\\''", "'")
-    try:
-        with open(os.path.realpath(sugar), "rb") as binary:
-            if MERGE_CHECK_MARK.encode() not in binary.read():
-                return "the sugar the wrapper runs predates the merge check: install a sugarhouse release with the merge check (sugarhouse#128)"
-    except OSError:
-        return "the sugar the wrapper runs can't be read"
-    # Ask mise which gh it will run there (where.cwd already follows -C): a
-    # project's config or the command's own variables could put another gh
-    # first. Offline, so a missing pinned tool doesn't wait on the network.
-    env = {**os.environ, **where.env, **assignments(argv[:at]), "MISE_OFFLINE": "1"}
-    mise = argv[at] if "/" in argv[at] else shutil.which("mise", path=env.get("PATH", ""))
-    error = ""
-    try:
-        out = subprocess.run([os.path.expanduser(mise or "mise"), "env", "--json"],
-                             cwd=where.cwd, env=env, capture_output=True, text=True, timeout=5)
-        path = json.loads(out.stdout).get("PATH", "") if out.returncode == 0 else None
-        lines = [l.strip() for l in out.stderr.splitlines() if l.strip() and "--verbose" not in l and "MISE_VERBOSE" not in l]
-        error = "; ".join(lines)[:300]  # real mise puts the cause (e.g. "not trusted") on a later line
-    except (OSError, subprocess.SubprocessError, ValueError, AttributeError) as e:
-        path, error = None, str(e)[:200]
-    if path is None:
-        return "mise couldn't say which gh it runs there" + (f" ({error})" if error else "")
-    found = shutil.which("gh", path=path)
-    if not found or pathlib.Path(found).resolve() != wrap.resolve():
-        return f"mise runs {found or 'no gh'} there, not Sugarhouse's wrapper"
-    return None
-
-
-def agent_merge(args):
-    """The merge form of Sugarhouse decision 96. The wrapper checks the rest
-    (green, squash, the base, the head) and refuses anything else; the guard
-    only keeps the owner out of it."""
-    if args[:2] != ["pr", "merge"] or len(args) < 3 or not PR_URL.fullmatch(args[2]):
-        return False
-    rest = args[3:]
-    return any(a in ("--squash", "-s") for a in rest) and "--as-owner" not in rest
-
-
-def gh_finding(args, where, checked=None):
-    words = positionals(args, GH_VALUE_OPTIONS | GH_API_VALUE_OPTIONS)
-    if words[:2] == ["pr", "merge"]:
-        if agent_merge(args):
-            missing = checked() if checked else "it isn't `mise exec -- gh`"
-            if not missing:
-                return None
-            return DENY, f"merges a pull request, and the agent's merge form doesn't apply because {missing}"
-        return DENY, "merges a pull request"
-    if words[:2] == ["repo", "delete"]:
-        return DENY, "deletes a repository"
-    if words[:1] != ["api"] or len(words) < 2:
-        return None
-    endpoint = words[1].lstrip("/")
-    fields = options(args, "-f", "--raw-field", "-F", "--field")
-    request = option(args, "--input")
-    method = (option(args, "-X", "--method") or ("POST" if fields or request else "GET")).upper()
-    if re.fullmatch(r"repos/[^/]+/[^/]+/pulls/[^/]+/merge", endpoint) and method in ("PUT", "POST"):
-        return DENY, "merges a pull request"
-    bodies = [(read(f.split("=@", 1)[1], where) or "") if "=@" in f else f for f in fields]
-    if request and request != "-":  # `--input -` reads stdin, checked where stdin is known
-        bodies.append(read(request, where) or "")
-    if endpoint == "graphql" and any(MERGE_MUTATION.search(body) for body in bodies):
-        return DENY, "merges a pull request"
-    if method == "DELETE" and re.fullmatch(r"repos/[^/]+/[^/]+/?", endpoint):
-        return DENY, "deletes a repository"
-    return None
-
-
-def network_finding(args):
-    """curl, wget, httpie or xh calling the GitHub REST API to merge a PR or delete a repository."""
-    for arg in args:
-        match = GITHUB_API.match(re.sub(r"^https?://", "", arg))
-        if not match:
-            continue
-        method = option(args, "-X", "--request", "--method")
-        if not method:
-            named = [a.upper() for a in args if a.upper() in HTTP_METHODS]
-            sends = any(a.startswith(("-d", "--data", "--json", "--form", "-F", "--post")) for a in args)
-            method = named[0] if named else ("POST" if sends else "GET")
-        method, path = method.upper(), match.group(1)
-        if path.endswith("/merge") and method in ("PUT", "POST"):
-            return DENY, "merges a pull request"
-        if not path.endswith("/merge") and method == "DELETE":
-            return DENY, "deletes a repository"
-    return None
 
 
 def remote_host(args, env):
@@ -651,11 +433,6 @@ def argv_findings(argv, where, depth):
         return
     for d in shell.program_dirs(argv):  # `mise -C dir exec -- ...` runs in dir
         where = where.but(cwd=where.path(d))
-    # MISE_CD moves mise like -C, from the command's variables or an earlier
-    # export: the plain form is -C, which the guard follows. Checked before
-    # anything below can return (a shell, -c text, a script).
-    if ("MISE_CD" in env or "MISE_CD" in where.env) and any(shell.mise_exec(argv, i) for i in range(len(argv))):
-        run = [shell.MISE_UNREADABLE] + run
     name, args = os.path.basename(run[0]), run[1:]
     # A child shell inherits the command's variables (`PGHOST=x bash -c ...`), and a
     # script runs in the caller's directory, not its own.
@@ -673,18 +450,11 @@ def argv_findings(argv, where, depth):
                     yield from findings(text, child, depth + 1)
                 return
         return
-    if "/" in run[0] and is_wrapper(run[0], where):
-        name = "gh"  # Sugarhouse's wrapper by path: its arguments are what matter, not its text
-    elif "/" in run[0]:
+    if "/" in run[0]:
         text = script(run[0], where)[1]
         if text:
             yield from findings(text, child, depth + 1)
             return
-    if run[0] == shell.MISE_UNREADABLE:
-        yield DENY, ("runs a `mise exec` the guard can't read (an option other than -C, -q, -y, -v or -c, a "
-                     "joined form such as -qC or -Cdir, or MISE_CD). Write it plainly, `mise exec -- <command>` or "
-                     "`mise -C <dir> exec -- <command>`, and run it again: this isn't a step reserved for the user")
-        return
     if name == "eval":
         yield from findings(" ".join(args), child, depth + 1)
     elif name == "ssh":
@@ -705,16 +475,8 @@ def argv_findings(argv, where, depth):
             yield kubectl_finding(args, where, env)
     elif name == "helm":
         yield helm_finding(args, where, env)
-    elif name == "git":
-        yield git_finding(args, where)
-    elif name == "gh":
-        yield gh_finding(args, where, checked=lambda: checked_merge(argv, run, where))
-    elif name == "sugar" and args[:1] == ["gh"]:
-        yield gh_finding(args[1:], where)
     elif name == "psql":
         yield from psql_findings(args, where, env)
-    elif name in NETWORK:
-        yield network_finding(args)
 
 
 def attach_heredocs(main, docs):
@@ -816,8 +578,6 @@ def findings(text, where, depth=0):
         if runs_in is not None:
             for script_text in inputs:
                 yield from findings(script_text, runs_in, depth + 1)
-        if inputs and os.path.basename(run[0]) == "gh" and "graphql" in run and any(MERGE_MUTATION.search(x) for x in inputs):
-            yield DENY, "merges a pull request"
         yield from argv_findings(argv, here, depth)
 
 
@@ -831,13 +591,10 @@ def decide(event):
     decision, why = next((f for f in found if f[0] == DENY), None) or (found[0] if found else (None, None))
     if not decision:
         return None
-    if decision == DENY and "the guard can't read" in why:
-        return DENY, f"Blocked by oh: this command {why}."
     if decision == DENY:
         return DENY, (
             f"Blocked by oh: this command {why}. "
-            + (AGENT_MERGE if "merges a pull request" in why else "That step is always the user's. ")
-            + "Stop, tell them what you "
+            "That step is always the user's. Stop, tell them what you "
             "wanted to do and why, and hand them the exact command (they can run it with `! <command>`). "
             "Don't look for another route to the same result."
         )
