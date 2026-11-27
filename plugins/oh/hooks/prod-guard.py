@@ -377,8 +377,8 @@ def checked_merge(argv, run, where):
         out = subprocess.run([os.path.expanduser(mise or "mise"), "env", "--json"],
                              cwd=where.cwd, env=env, capture_output=True, text=True, timeout=5)
         path = json.loads(out.stdout).get("PATH", "") if out.returncode == 0 else None
-        lines = [l.strip() for l in out.stderr.splitlines() if l.strip() and not l.strip().startswith("Run with")]
-        error = (lines[0] if lines else "")[:200]
+        lines = [l.strip() for l in out.stderr.splitlines() if l.strip() and "--verbose" not in l and "MISE_VERBOSE" not in l]
+        error = "; ".join(lines)[:300]  # real mise puts the cause (e.g. "not trusted") on a later line
     except (OSError, subprocess.SubprocessError, ValueError, AttributeError) as e:
         path, error = None, str(e)[:200]
     if path is None:
@@ -675,9 +675,14 @@ def argv_findings(argv, where, depth):
         if text:
             yield from findings(text, child, depth + 1)
             return
+    # MISE_CD moves mise like -C, from the command's variables or an earlier
+    # export: the plain form is -C, which the guard follows.
+    moved = "MISE_CD" in env or "MISE_CD" in where.env
+    if moved and any(shell.mise_exec(argv, i) for i in range(len(argv))):
+        run = [shell.MISE_UNREADABLE] + run
     if run[0] == shell.MISE_UNREADABLE:
-        yield DENY, ("runs a `mise exec` the guard can't read (an option other than -C, -q, -y, -v or -c, or a "
-                     "joined form such as -qC or -Cdir). Write it plainly, `mise exec -- <command>` or "
+        yield DENY, ("runs a `mise exec` the guard can't read (an option other than -C, -q, -y, -v or -c, a "
+                     "joined form such as -qC or -Cdir, or MISE_CD). Write it plainly, `mise exec -- <command>` or "
                      "`mise -C <dir> exec -- <command>`, and run it again: this isn't a step reserved for the user")
         return
     if name == "eval":

@@ -221,10 +221,21 @@ def mise_exec(argv, i):
     m = MiseExec()
     j = _mise_options(argv, i + 1, m, False)
     if m.unreadable:
-        # Can't tell the subcommand: unreadable only if exec or x is in it.
-        if any(w in ("exec", "x") for w in argv[i + 1:]):
-            return m
-        return None
+        # Can't tell the subcommand. It's exec if `exec` or `x` comes among
+        # the words up to the first two non-option words in a row (an unknown
+        # option's value, then the subcommand and its first argument), so
+        # `mise -E prod run test -- --grep exec` isn't taken for one.
+        seen, last_plain = [], False
+        for w in argv[i + 1:]:
+            if w == "--":
+                break
+            plain = not w.startswith("-")
+            if plain:
+                seen.append(w)
+                if last_plain:
+                    break
+            last_plain = plain
+        return m if any(w in ("exec", "x") for w in seen) else None
     if j >= len(argv) or argv[j] not in ("exec", "x"):
         return None
     j += 1
@@ -253,6 +264,10 @@ def _walk(argv):
             value_options = RUNNERS[word]
             i += 1
             while i < len(argv) and argv[i].startswith("-"):
+                if word == "env" and argv[i] in ("-C", "--chdir") and i + 1 < len(argv):
+                    dirs.append(argv[i + 1])  # env -C dir runs the command there
+                elif word == "env" and argv[i].startswith("--chdir="):
+                    dirs.append(argv[i].split("=", 1)[1])
                 i += 2 if argv[i] in value_options else 1
             if word == "timeout" and i < len(argv):
                 i += 1

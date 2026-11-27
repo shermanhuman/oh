@@ -392,6 +392,7 @@ class AgentMerge(unittest.TestCase):
                 self.assertIn("mise exec -- <command>", out["permissionDecisionReason"])
         # Plain forms, and mise commands that aren't exec, are untouched.
         for command in ["mise exec -- ls", "mise x node@22 -- node -v", "mise -q exec -- ls", "mise run test",
+                        "mise -E prod run test -- --grep exec", "mise -P ci run lint x",
                         "mise use -g gh@2", "mise -v", "mise -C /tmp x -- ls"]:
             with self.subTest(command=command):
                 self.assertIsNone(self.decision(command))
@@ -399,7 +400,8 @@ class AgentMerge(unittest.TestCase):
     def test_a_mise_error_shows_its_cause(self):
         self.wrap()
         mise = self.realdir / "mise"
-        mise.write_text("#!/bin/sh\necho 'mise ERROR Config files in ~/p/mise.toml are not trusted.' >&2\n"
+        mise.write_text("#!/bin/sh\necho 'mise ERROR error parsing config file: ~/p/mise.toml' >&2\n"
+                        "echo 'mise ERROR Config files in ~/p/mise.toml are not trusted.' >&2\n"
                         "echo 'Run with --verbose or MISE_VERBOSE=1 for more information' >&2\nexit 1\n")
         out = run(f"mise exec -- gh pr merge {URL} --squash", env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
         self.assertIn("are not trusted", out["permissionDecisionReason"])
@@ -485,6 +487,9 @@ class Guard(unittest.TestCase):
             # mise's -C moves the command into the repository, before or after exec.
             self.check([f"mise -C {work} exec -- git push", f"mise x -C {work} -- git push origin HEAD"], "deny")
             self.check([f"mise -C /tmp exec -C {work} -- git push"], "deny")
+            # MISE_CD moves mise too: refused with the plain -C form. env -C is followed.
+            self.check([f"MISE_CD={work} mise exec -- git push", f"env MISE_CD={work} mise exec -- git push",
+                        f"export MISE_CD={work}; mise exec -- git push", f"env -C {work} git push"], "deny")
             git("switch", "-q", "-c", "feat/x", cwd=work)
             self.check(["git push", "git push origin HEAD", "git push -u origin feat/x"], None, cwd=str(work))
             self.check(["git push origin HEAD:trunk", "git push origin main"], "deny", cwd=str(work))
