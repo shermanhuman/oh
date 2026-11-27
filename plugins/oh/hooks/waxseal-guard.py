@@ -26,7 +26,7 @@ heredoc doesn't end the way bash would end it, the text is too long or nested
 too deep, the program or gcloud's command group is a variable or expansion, a
 shell reads commands from stdin or a process substitution, an alias is defined, a script it runs was
 written by a command that mentions Secret Manager (`echo 'gcloud secrets …' >
-run.sh`), or the guard itself fails or runs past its 5 s deadline), it refuses the text
+run.sh`), a script it runs is too long or can't be read, or the guard itself fails or runs past its 5 s deadline), it refuses the text
 if it mentions Secret Manager (`MENTION`) and lets it through otherwise.
 
 Not covered, by design: a command deliberately disguised to get past the guard
@@ -246,7 +246,7 @@ def shell_command(args):
     i, run_string = 0, False
     while i < len(args):
         arg = args[i]
-        if arg == "--":
+        if arg in ("--", "-"):  # bash and sh read `-` as `--`: `bash -` reads stdin, `bash - x.sh` runs x.sh
             i += 1
             break
         if arg in ("--rcfile", "--init-file"):
@@ -448,6 +448,8 @@ def script_reason(script, cwd, depth, mentioned):
         _, text = shell.read_script(path, cwd)
         if text is not None:
             readings += [(cwd, text), (os.path.dirname(path), text)]
+        elif mentioned and os.path.exists(path):
+            return UNSURE  # there, but too long or unreadable: a script the guard can't read, not a gap
     if mentioned and any(k in STATE["redirected"] for k in keys(script, cwd)):
         return UNSURE
     for here, text in dict.fromkeys(readings):
@@ -455,6 +457,24 @@ def script_reason(script, cwd, depth, mentioned):
         if why:
             return why
     return None
+
+
+def unread_script(path):
+    """True for a file run directly that looks like a script (a shell suffix, a `#!` line naming a
+    shell, or executable text with no `#!`) but that the readers skipped: too long or unreadable."""
+    if not os.path.isfile(path):
+        return False
+    try:
+        if os.path.getsize(path) <= MAX_TEXT and os.access(path, os.R_OK):
+            return False  # read in full above: not a script, or a binary
+        with open(path, "rb") as f:
+            head = f.read(1024)
+    except OSError:
+        return pathlib.Path(path).suffix in SHELL_SUFFIXES
+    first = head.split(b"\n", 1)[0]
+    if pathlib.Path(path).suffix in SHELL_SUFFIXES or (first.startswith(b"#!") and re.search(rb"\b(ba|z|da|k)?sh\b", first)):
+        return True
+    return not first.startswith(b"#!") and b"\0" not in head and os.access(path, os.X_OK)
 
 
 def first_reason(argv, name, args, cwd, depth, mentioned, fed=False):
@@ -500,6 +520,8 @@ def first_reason(argv, name, args, cwd, depth, mentioned, fed=False):
                 why = reason_for(text, here, depth + 1)
                 if why:
                     return why
+        elif mentioned and unread_script(candidate):
+            return UNSURE  # a script too long or unreadable to read; a binary still passes
     if name == "eval":
         return reason_for(" ".join(args), cwd, depth + 1, mentioned)
     if name == "trap":

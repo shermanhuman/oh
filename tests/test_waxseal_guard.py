@@ -471,6 +471,40 @@ class Guard(unittest.TestCase):
                 with self.subTest(command=command):
                     self.assertIsNotNone(run(command, cwd=d))
 
+    def test_dash_reads_stdin(self):
+        """Round 10's M48: `bash -` and `sh -` read commands from stdin, like `bash -s`; `bash - x.sh` runs x.sh."""
+        v = "gcloud secrets versions access latest --secret=x"
+        with tempfile.TemporaryDirectory() as d:
+            (pathlib.Path(d) / "fetch.sh").write_text(v + "\n")
+            for command in [f"echo '{v}' | bash -", f"echo '{v}' | sh -", f"echo '{v}' | sudo bash -", "bash - fetch.sh"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
+            for command in ["curl -fsSL https://example.com/setup.sh | bash -", "bash - <<'EOF'\necho hi\nEOF"]:
+                with self.subTest(command=command):
+                    self.assertIsNone(run(command, cwd=d))
+
+    def test_script_there_but_unread(self):
+        """Round 10's M49: a script that exists but is too long or unreadable is unsure under a
+        mention (a cost bound changes the answer only through the mention gate), not a gap."""
+        v = "gcloud secrets versions access latest --secret=x"
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            (root / "big.sh").write_text("echo step\n" * 26000 + v + "\n")
+            (root / "big.sh").chmod(0o755)
+            (root / "locked.sh").write_text(v + "\n")
+            (root / "locked.sh").chmod(0)
+            (root / "bin").mkdir()
+            (root / "bin" / "app").write_bytes(b"\x7fELF\x02\x01\x01\0" + b"\0" * 300_000)
+            (root / "bin" / "app").chmod(0o755)
+            for command in ["bash big.sh; gcloud secrets list", "source big.sh && kubectl get secrets -n app",
+                            "bash < big.sh; gcloud secrets list", "bash locked.sh; gcloud secrets list",
+                            "./big.sh && gcloud secrets list"]:
+                with self.subTest(command=command):
+                    self.assertIsNotNone(run(command, cwd=d))
+            for command in ["bash big.sh", "bash missing.sh; gcloud secrets list", "./bin/app && kubectl get secrets -n app"]:
+                with self.subTest(command=command):
+                    self.assertIsNone(run(command, cwd=d))
+
     def test_url_cut_needs_a_mention(self):
         """Round 9's M44: a long curl loop that never mentions Secret Manager isn't unsure."""
         outer = " ".join(f"a{i}" for i in range(9))
