@@ -16,8 +16,6 @@ HOME = pathlib.Path(tempfile.mkdtemp(prefix="prod-guard-"))
 atexit.register(shutil.rmtree, HOME, ignore_errors=True)
 (HOME / "sql").mkdir()
 (HOME / "sql/drop.sql").write_text("DROP TABLE t;\n")
-(HOME / "merge.json").write_text("{\"query\": \"mutation { mergePullRequest(input: {pullRequestId: \\\"x\\\"}) { clientMutationId } }\"}\n")
-(HOME / "merge.graphql").write_text("mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }\n")
 (HOME / ".kube").mkdir()
 (HOME / ".kube/config").write_text("apiVersion: v1\ncontexts: []\n")
 (HOME / "prod.yaml").write_text("apiVersion: v1\ncurrent-context: \"default\"\n")
@@ -218,8 +216,6 @@ def run(command, cwd=OUTSIDE, raw=None, env=None):
     return json.loads(result.stdout)["hookSpecificOutput"] if result.stdout.strip() else None
 
 
-
-
 class Mise(unittest.TestCase):
     """mise's -C moves the command; an exec the guard can't read gets no decision."""
 
@@ -233,7 +229,9 @@ class Mise(unittest.TestCase):
     def test_an_unreadable_mise_exec_reads_the_command_after_dashes(self):
         for command in ["mise exec -E prod -- kubectl delete ns x --context default",
                         "mise x --env prod -- helm uninstall web --kube-context default",
-                        "mise exec -E prod -- psql -h db.prod -c 'DROP TABLE t'"]:
+                        "mise exec -E prod -- psql -h db.prod -c 'DROP TABLE t'",
+                        "mise exec -E prod -- env FOO=1 kubectl delete ns x --context default",
+                        "mise exec -E prod -- timeout 5 kubectl delete ns x --context default"]:
             with self.subTest(command=command):
                 self.assertEqual(run(command)["permissionDecision"], "ask")
         self.assertIsNone(run("mise -qC /tmp exec -- ls"))

@@ -275,7 +275,10 @@ def _walk(argv):
                 # `--` (as oh 3.2 did), in the current directory; with no
                 # `--`, nothing it can name runs.
                 rest = argv[i:]
-                return (rest[rest.index("--") + 1:] if "--" in rest else []), dirs
+                if "--" not in rest:
+                    return [], dirs
+                i += rest.index("--") + 1
+                continue  # read on, so env, timeout or sudo after `--` are stripped too
             if m.dir is not None:
                 dirs.append(m.dir)
             if m.command is not None:
