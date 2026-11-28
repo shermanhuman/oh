@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "oh",
-      "description": "Sherman's working agreements: mise first, pull requests as releases, version bumps, a process and secrets guard (one specific kill at a time, no printing secret files), reviewer choices; release, waxseal, mise and Dockerfile skills.",
+      "description": "Sherman's working agreements: mise first, pull requests into rc with releases through Sugarhouse, version bumps, a process and secrets guard (one specific kill at a time, no printing secret files), reviewer choices; release, waxseal, mise and Dockerfile skills.",
       "source": "./plugins/oh"
     },
     {
