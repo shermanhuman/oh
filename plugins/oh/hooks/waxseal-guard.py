@@ -352,11 +352,6 @@ def argv_reason(argv, cwd, depth, mentioned, nested=True):
     argv = unwrap(argv)
     if not argv:
         return None
-    if argv[0] == shell.MISE_UNREADABLE:
-        # `mise -E prod exec -- ./run.sh`: options the reader doesn't know; the command after `--` still runs.
-        if "--" in argv:
-            return argv_reason(argv[argv.index("--") + 1:], cwd, depth + 1, mentioned)
-        return UNSURE if mentioned else None
     name = os.path.basename(argv[0])
     args = argv[1:]
     if isinstance(argv[0], Expanded) and any(k in STATE["written"] for k in keys(argv[0], cwd)):
