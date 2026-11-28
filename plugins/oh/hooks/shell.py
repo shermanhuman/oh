@@ -588,12 +588,9 @@ def simple_commands(text):
 
 # The mise options the guard reads. Anything else in a `mise exec` (another
 # option, a joined form such as -qC or -Cdir, -E or -P which change the
-# config) makes it unreadable, and the production guard refuses it with the
-# plain form to use instead: mise's syntax is wider than any list.
+# config) makes it unreadable, and the guards give it no decision: mise's
+# syntax is wider than any list, and agents use the plain forms.
 MISE_FLAGS = {"-q", "--quiet", "-y", "--yes", "-v", "--verbose"}
-
-
-MISE_UNREADABLE = "<mise the guard can't read>"
 
 
 class MiseExec:
@@ -686,7 +683,14 @@ def _walk(argv):
         elif mise_exec(argv, i):
             m = mise_exec(argv, i)
             if m.unreadable:
-                return [MISE_UNREADABLE] + argv[i:], dirs
+                # Options the guard doesn't know: read the command after
+                # `--` (as oh 3.2 did), in the current directory; with no
+                # `--`, nothing it can name runs.
+                rest = argv[i:]
+                if "--" not in rest:
+                    return [], dirs
+                i += rest.index("--") + 1
+                continue  # read on, so env, timeout or sudo after `--` are stripped too
             if m.dir is not None:
                 dirs.append(m.dir)
             if m.command is not None:
