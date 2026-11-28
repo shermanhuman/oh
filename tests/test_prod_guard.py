@@ -16,8 +16,6 @@ HOME = pathlib.Path(tempfile.mkdtemp(prefix="prod-guard-"))
 atexit.register(shutil.rmtree, HOME, ignore_errors=True)
 (HOME / "sql").mkdir()
 (HOME / "sql/drop.sql").write_text("DROP TABLE t;\n")
-(HOME / "merge.json").write_text("{\"query\": \"mutation { mergePullRequest(input: {pullRequestId: \\\"x\\\"}) { clientMutationId } }\"}\n")
-(HOME / "merge.graphql").write_text("mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }\n")
 (HOME / ".kube").mkdir()
 (HOME / ".kube/config").write_text("apiVersion: v1\ncontexts: []\n")
 (HOME / "prod.yaml").write_text("apiVersion: v1\ncurrent-context: \"default\"\n")
@@ -27,46 +25,13 @@ atexit.register(shutil.rmtree, HOME, ignore_errors=True)
 OUTSIDE = str(HOME)
 REPLICA = "kubectl exec -i -n default \"$replica\" -c postgres -- psql -U postgres -d breakdown_admin_prod -v ON_ERROR_STOP=1 -At <<'SQL'\n{}\nSQL"
 
-# Always the user's step.
-DENIED = [
+# Merges, pushes and repository deletes: GitHub's rulesets decide, not the guard.
+NOT_CHECKED = [
     "gh pr merge 12 --squash",
-    "mise exec -- gh pr merge 12 --auto --merge",
-    "MISE_EXEC_AUTO_INSTALL=false mise exec -- gh -R o/r pr merge 12",
     "gh api -X PUT repos/o/r/pulls/12/merge",
-    "gh api repos/o/r/pulls/12/merge -f merge_method=squash",
-    "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
-    "gh api graphql -F query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
-    "gh api -X DELETE repos/o/r",
     "gh repo delete o/r --yes",
-    "git push --force",
-    "git push -f origin feat/x",
-    "git push -uf origin feat/x",
-    "git push --force-with-lease origin feat/x",
-    "git push --force-with-lease=feat/x:abc origin feat/x",
-    "git push origin +feat/x:feat/x",
-    "git push --mirror",
-    "git push origin --all",
-    "git push origin HEAD:main",
-    "git push origin feat:refs/heads/main",
-    "git push origin master",
-    "git push origin --delete main",
-    "cd /tmp && git push origin HEAD:master",
-    "bash -c 'git push origin HEAD:main'",
-    "ssh vm 'cd repo && git push origin main'",
-    "echo ok && $(gh pr merge 3)",
-    "gh api graphql -f query=@merge.graphql",
-    "gh api graphql -F query=@- <<'EOF'\nmutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }\nEOF",
-    "curl -X PUT -H 'Authorization: token x' https://api.github.com/repos/o/r/pulls/12/merge",
-    "curl -fsS https://api.github.com/repos/o/r/pulls/12/merge -d '{\"merge_method\":\"squash\"}'",
-    "curl -X DELETE https://api.github.com/repos/o/r",
-    "xh PUT api.github.com/repos/o/r/pulls/12/merge",
-    "printf 'gh pr merge 12\\n' > m.sh && bash m.sh",
-    "out=`git push --force origin main`",
-    "gh api graphql --input merge.json",
-    "gh api graphql --input=merge.json",
-    "git push --repo origin HEAD:main",
-    "git push --repo=origin +HEAD:feat/x",
-    "gh api repos/o/r/pulls/12/merge --input=merge.json",
+    "git push --force origin main",
+    "curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge",
 ]
 
 # Irreversible in production: the user approves each one.
@@ -251,184 +216,40 @@ def run(command, cwd=OUTSIDE, raw=None, env=None):
     return json.loads(result.stdout)["hookSpecificOutput"] if result.stdout.strip() else None
 
 
-def git(*args, cwd):
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+class Mise(unittest.TestCase):
+    """mise's -C moves the command; an exec the guard can't read gets no decision."""
 
-
-URL = "https://github.com/Applesauce-Labs/sugarhouse/pull/9"
-
-
-class AgentMerge(unittest.TestCase):
-    """Sugarhouse decision 96: the agent's squash into rc or hotfix, through a wrapper that checks it."""
-
-    def setUp(self):
-        self.home = pathlib.Path(tempfile.mkdtemp(prefix="agent-merge-"))
-        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
-        (self.home / ".kube").mkdir()
-        (self.home / ".kube/config").write_text("apiVersion: v1\ncontexts: []\n")
-        self.wrapdir = self.home / ".local/share/sugarhouse/wrap"
-        self.sugar = self.home / ".local/share/sugarhouse/bin/sugar"
-        self.realdir = self.home / "real"
-        self.realdir.mkdir()
-        (self.realdir / "gh").write_bytes(b"\x7fELF fake binary\n")
-        (self.realdir / "gh").chmod(0o755)
-
-    def wrap(self, mark=True, sugar_checks=True):
-        self.wrapdir.mkdir(parents=True)
-        self.sugar.parent.mkdir(parents=True)
-        self.sugar.write_bytes(b"\x7fELF sugar " + (b"# sugarhouse: merge-check" if sugar_checks else b"") + b"\n")
-        line = "# sugarhouse: merge-check\n" if mark else ""
-        # setup-identity's form: shellQuote leaves a plain path unquoted.
-        quoted = f"'{self.sugar}'" if " " in str(self.sugar) else str(self.sugar)
-        (self.wrapdir / "gh").write_text(f"#!/bin/sh\n# gh as the Sugarhouse GitHub App\n{line}exec {quoted} gh \"$@\"\n")
-        (self.wrapdir / "gh").chmod(0o755)
-        self.mise_path(f"{self.wrapdir}:{self.realdir}")
-
-    def mise_path(self, path):
-        """What a fake mise says its PATH is (`mise env --json`), like a real one
-        with Sugarhouse's conf.d entry, or a project config that puts another gh first."""
-        (self.home / "mise-path").write_text(path)
-        mise = self.realdir / "mise"
-        # A directory's own mise-path file stands for a project config there.
-        # Asked offline, so a missing pinned tool never waits on the network.
-        mise.write_text("#!/bin/sh\n[ \"$*\" = \"env --json\" ] || [ \"$*\" = \"-q env --json\" ] || exit 2\n"
-                        "[ \"$MISE_OFFLINE\" = 1 ] || { echo 'not offline' >&2; exit 3; }\n"
-                        f"f='{self.home}/mise-path'; [ -f mise-path ] && f=mise-path\n"
-                        "printf '{\"PATH\": \"%s\"}' \"$(cat \"$f\")\"\n")
-        mise.chmod(0o755)
-
-    def decision(self, command, first=None):
-        path = f"{first}:{self.realdir}:/usr/bin:/bin" if first else f"{self.realdir}:/usr/bin:/bin"
-        out = run(command, env={"HOME": str(self.home), "PATH": path})
-        return out and out["permissionDecision"]
-
-    def test_the_allowed_form(self):
-        self.wrap()
-        for command in [
-            f"mise exec -- gh pr merge {URL} --squash",
-            f"mise exec -- gh pr merge {URL} -s -d --match-head-commit abc",
-            f"MISE_EXEC_AUTO_INSTALL=false mise exec -- gh pr merge {URL} --squash --subject 'feat: x'",
-            f"mise x -- gh pr merge {URL} --squash",
-            f"mise -q exec -- gh pr merge {URL} --squash",
-            f"mise -C /tmp exec -- gh pr merge {URL} --squash",
-        ]:
+    def test_mise_c_and_c_text_are_followed(self):
+        for command in ["mise exec -- kubectl delete ns x --context default",
+                        "mise -C /tmp exec -- kubectl delete ns x --context default",
+                        "mise x -c 'kubectl delete ns x --context default'"]:
             with self.subTest(command=command):
-                self.assertIsNone(self.decision(command))
+                self.assertEqual(run(command)["permissionDecision"], "ask")
 
-    def test_everything_else_is_denied(self):
-        self.wrap()
-        for command in [
-            "mise exec -- gh pr merge 9 --squash",                  # no URL
-            f"mise exec -- gh pr merge --squash {URL}",             # the URL isn't straight after merge
-            f"mise exec -- gh pr merge {URL}",                      # no --squash
-            f"mise exec -- gh pr merge https://github.com/o/r/issues/9 --squash",
-            f"mise exec -- gh pr merge {URL} --squash --as-owner",
-            f"gh pr merge {URL} --squash",                          # bare gh, even with the wrapper first
-            f"~/.local/share/sugarhouse/bin/sugar gh pr merge {URL} --squash",
-            f"~/.local/share/sugarhouse/bin/sugar gh --as-owner pr merge {URL} --squash",
-            f"~/.local/share/sugarhouse/wrap/gh pr merge {URL} --squash",
-            f"{self.wrapdir}/gh --as-owner pr merge {URL} --squash",
-            f"{self.wrapdir}/gh pr merge 9 --admin",
-            f"{self.realdir}/gh pr merge {URL} --squash",
-            f"ssh vm 'mise exec -- gh pr merge {URL} --squash'",
-            "mise exec -- gh api -X PUT repos/o/r/pulls/9/merge",
-            "mise -C /tmp exec -- gh pr merge 9 --admin",       # global options before exec are seen
-            "mise -q x -- gh pr merge 9 --admin",
-            f"{self.realdir}/mise exec -- gh pr merge 9 --admin",  # mise by path
-            f"mise exec -- env PATH=/x gh pr merge {URL} --squash",  # something between -- and gh
-        ]:
+    def test_an_unreadable_mise_exec_reads_the_command_after_dashes(self):
+        for command in ["mise exec -E prod -- kubectl delete ns x --context default",
+                        "mise x --env prod -- helm uninstall web --kube-context default",
+                        "mise exec -E prod -- psql -h db.prod -c 'DROP TABLE t'",
+                        "mise exec -E prod -- env FOO=1 kubectl delete ns x --context default",
+                        "mise exec -E prod -- timeout 5 kubectl delete ns x --context default"]:
             with self.subTest(command=command):
-                self.assertEqual(self.decision(command, self.wrapdir), "deny")
+                self.assertEqual(run(command)["permissionDecision"], "ask")
+        self.assertIsNone(run("mise -qC /tmp exec -- ls"))
 
-    def test_an_older_sugar_is_denied(self):
-        for mark, sugar_checks in [(False, True), (True, False), (False, False)]:
-            with self.subTest(mark=mark, sugar_checks=sugar_checks):
-                shutil.rmtree(self.home / ".local", ignore_errors=True)
-                shutil.rmtree(self.home / ".config", ignore_errors=True)
-                self.wrap(mark, sugar_checks)
-                self.assertEqual(self.decision(f"mise exec -- gh pr merge {URL} --squash"), "deny")
-                # The wrapper by path is checked as gh, never read as a script.
-                self.assertEqual(self.decision(f"{self.wrapdir}/gh pr merge 9 --admin"), "deny")
-
-    def test_a_quoted_sugar_path(self):
-        self.sugar = self.home / "my sugar/sugar"  # shellQuote's form: '/path with space/sugar'
-        self.wrap()
-        self.assertIsNone(self.decision(f"mise exec -- gh pr merge {URL} --squash"))
-
-    def test_mise_running_another_gh_is_denied(self):
-        self.wrap()
-        self.mise_path(f"{self.realdir}:{self.wrapdir}")  # e.g. a project's [env] _.path
-        out = run(f"mise exec -- gh pr merge {URL} --squash", env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
-        self.assertEqual(out["permissionDecision"], "deny")
-        self.assertIn("not Sugarhouse's wrapper", out["permissionDecisionReason"])
-
-    def test_mise_c_moves_the_check_into_that_directory(self):
-        self.wrap()
-        project = self.home / "project"
-        project.mkdir()
-        (project / "mise-path").write_text(f"{self.realdir}:{self.wrapdir}")  # its config puts the real gh first
-        for command in [f"mise -C {project} exec -- gh pr merge {URL} --squash",
-                        f"mise x -C {project} -- gh pr merge {URL} --squash",
-                        f"mise exec --cd={project} -- gh pr merge {URL} --squash"]:
-            with self.subTest(command=command):
-                self.assertEqual(self.decision(command), "deny")
-        self.assertIsNone(self.decision(f"mise -C {self.home} exec -- gh pr merge {URL} --squash"))
-
-    def test_mise_c_text_and_hidden_options_are_read(self):
-        for command in ["mise x -c 'gh pr merge 9 --admin'", "mise exec -c 'git push --force'",
-                        "mise exec --command='git push --force'", "mise -P prod exec -- git push --force",
-                        "mise --log-level debug x -- git push --force", "mise exec gh@2 -- gh pr merge 9"]:
-            with self.subTest(command=command):
-                self.assertEqual(self.decision(command), "deny")
-
-    def test_a_mise_exec_the_guard_cannot_read_is_refused_with_the_plain_form(self):
-        self.wrap()
-        for command in ["mise -qC /tmp exec -- ls", "mise -Cwork exec -- ls", "mise -C=work exec -- ls",
-                        "mise x -c'ls'", "mise x -c='ls'", "mise x -qc 'ls'", "mise -E prod exec -- ls",
-                        f"mise x -E prod -- gh pr merge {URL} --squash", f"mise exec -P prod -- gh pr merge {URL} --squash"]:
-            with self.subTest(command=command):
-                out = run(command, env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
-                self.assertEqual(out["permissionDecision"], "deny")
-                self.assertIn("mise exec -- <command>", out["permissionDecisionReason"])
-        # Plain forms, and mise commands that aren't exec, are untouched.
-        for command in ["mise exec -- ls", "mise x node@22 -- node -v", "mise -q exec -- ls", "mise run test",
-                        "mise -E prod run test -- --grep exec", "mise -P ci run lint x",
-                        "mise use -g gh@2", "mise -v", "mise -C /tmp x -- ls"]:
-            with self.subTest(command=command):
-                self.assertIsNone(self.decision(command))
-
-    def test_a_mise_error_shows_its_cause(self):
-        self.wrap()
-        mise = self.realdir / "mise"
-        mise.write_text("#!/bin/sh\necho 'mise ERROR error parsing config file: ~/p/mise.toml' >&2\n"
-                        "echo 'mise ERROR Config files in ~/p/mise.toml are not trusted.' >&2\n"
-                        "echo 'Run with --verbose or MISE_VERBOSE=1 for more information' >&2\nexit 1\n")
-        out = run(f"mise exec -- gh pr merge {URL} --squash", env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
-        self.assertIn("are not trusted", out["permissionDecisionReason"])
-
-    def test_the_last_mise_c_wins(self):
-        self.wrap()
-        project = self.home / "project"
-        project.mkdir()
-        (project / "mise-path").write_text(f"{self.realdir}:{self.wrapdir}")
-        self.assertEqual(self.decision(f"mise -C {self.home} exec -C {project} -- gh pr merge {URL} --squash"), "deny")
-
-    def test_global_mise_options_were_a_blind_spot(self):
-        for command in ["mise -C /tmp exec -- git push --force", "mise -q x -- git push origin HEAD:main",
-                        "/usr/local/bin/mise exec -- git push --force"]:
-            with self.subTest(command=command):
-                self.assertEqual(self.decision(command), "deny")
-
-    def test_without_the_wrapper_it_is_denied(self):
-        self.assertEqual(self.decision(f"mise exec -- gh pr merge {URL} --squash"), "deny")
-
-    def test_a_denied_merge_names_the_allowed_form(self):
-        out = run("gh pr merge 9 --squash", env={"HOME": str(self.home)})
-        self.assertIn("mise exec -- gh pr merge <full PR URL> --squash", out["permissionDecisionReason"])
-        self.assertNotIn("always the user's", out["permissionDecisionReason"])
-        self.wrap(mark=False)
-        out = run(f"mise exec -- gh pr merge {URL} --squash", env={"HOME": str(self.home), "PATH": f"{self.realdir}:/usr/bin:/bin"})
-        self.assertIn("predates the merge check", out["permissionDecisionReason"])
+    def test_the_command_runs_where_mise_and_env_put_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            sub = pathlib.Path(d) / "sub"
+            sub.mkdir()
+            (sub / "drill.sh").write_text("#!/bin/sh\nkubectl --context default delete ns x\n")
+            for command in ["mise -C sub exec -- ./drill.sh", "mise x -C sub -- bash drill.sh",
+                            "mise exec --cd=sub -- ./drill.sh", "env -C sub ./drill.sh",
+                            "mise x node@22 -- env -C sub bash drill.sh",
+                            "mise exec --command='kubectl delete ns x --context default'"]:
+                with self.subTest(command=command):
+                    out = run(command, cwd=d)
+                    self.assertIsNotNone(out, "the script in sub/ is read")
+                    self.assertEqual(out["permissionDecision"], "ask")
+            self.assertIsNone(run("./drill.sh", cwd=d), "outside sub/ there's no drill.sh")
 
 
 class Guard(unittest.TestCase):
@@ -442,8 +263,8 @@ class Guard(unittest.TestCase):
                     self.assertIsNotNone(out)
                     self.assertEqual(out["permissionDecision"], decision)
 
-    def test_denied(self):
-        self.check(DENIED, "deny")
+    def test_merges_and_pushes_are_githubs(self):
+        self.check(NOT_CHECKED, None)
 
     def test_asked(self):
         self.check(ASKED, "ask")
@@ -454,7 +275,6 @@ class Guard(unittest.TestCase):
     def test_reasons_say_what_and_where(self):
         self.assertIn("kube context `default`", run("kubectl delete ns x --context default")["permissionDecisionReason"])
         self.assertIn("can't resolve", run("kubectl --context $C delete ns x")["permissionDecisionReason"])
-        self.assertIn("! <command>", run("gh pr merge 1")["permissionDecisionReason"])
 
     def test_unknown_context_counts_as_production(self):
         with tempfile.TemporaryDirectory() as d:
@@ -468,41 +288,6 @@ class Guard(unittest.TestCase):
         out = run(None, raw=json.dumps(event))
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertIn("Codex can't ask", out["permissionDecisionReason"])
-
-    def test_deny_wins_over_ask(self):
-        out = run("kubectl delete ns x --context default; gh pr merge 1")
-        self.assertEqual(out["permissionDecision"], "deny")
-
-    def test_default_branch_comes_from_the_repository(self):
-        with tempfile.TemporaryDirectory() as d:
-            root = pathlib.Path(d)
-            git("init", "-q", "--bare", "-b", "trunk", "origin.git", cwd=d)
-            git("clone", "-q", "origin.git", "work", cwd=d)
-            work = root / "work"
-            git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x", cwd=work)
-            git("push", "-q", "origin", "trunk", cwd=work)
-            git("remote", "set-head", "origin", "trunk", cwd=work)
-            self.check(["git push", "git push origin HEAD", "git push -u origin HEAD", "git push origin trunk"], "deny", cwd=str(work))
-            self.check([f"git -C {work} push", f"cd {work} && git push"], "deny")
-            # mise's -C moves the command into the repository, before or after exec.
-            self.check([f"mise -C {work} exec -- git push", f"mise x -C {work} -- git push origin HEAD"], "deny")
-            self.check([f"mise -C /tmp exec -C {work} -- git push"], "deny")
-            # MISE_CD moves mise too: refused with the plain -C form. env -C is followed.
-            self.check([f"MISE_CD={work} mise exec -- git push", f"env MISE_CD={work} mise exec -- git push",
-                        f"export MISE_CD={work}; mise exec -- git push", f"env -C {work} git push",
-                        f"MISE_CD={work} mise exec -- bash -c 'git push'", f"MISE_CD={work} mise x -c 'git push'",
-                        f"export MISE_CD={work}; mise exec -- bash -c 'git push'",
-                        f"env --chdir {work} git push", f"env --chdir={work} git push"], "deny")
-            self.check([f"cd {work} && env --unset FOO git push"], "deny")  # --unset takes its value
-            git("switch", "-q", "-c", "feat/x", cwd=work)
-            self.check(["git push", "git push origin HEAD", "git push -u origin feat/x"], None, cwd=str(work))
-            self.check(["git push origin HEAD:trunk", "git push origin main"], "deny", cwd=str(work))
-            git("switch", "-q", "trunk", cwd=work)
-            self.check(["git push --tags", "git push origin --tags"], None, cwd=str(work))
-            git("switch", "-q", "feat/x", cwd=work)
-            git("config", "push.default", "upstream", cwd=work)
-            git("branch", "-q", "--set-upstream-to", "origin/trunk", cwd=work)
-            self.check(["git push"], "deny", cwd=str(work))
 
     def test_shell_scripts_are_read_before_they_run(self):
         with tempfile.TemporaryDirectory() as d:
