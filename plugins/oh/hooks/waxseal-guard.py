@@ -24,10 +24,12 @@ operators, fd numbers, CR, quoting, `$'…'`, arithmetic and heredocs can't hide
 a command by accident. Where it still can't be sure (the text doesn't lex, a
 heredoc doesn't end the way bash would end it, the text is too long or nested
 too deep, the program or gcloud's command group is a variable or expansion, a
-shell reads commands from stdin or a process substitution, an alias is defined, a script it runs was
-written by a command that mentions Secret Manager (`echo 'gcloud secrets …' >
-run.sh`), a script it runs is too long or can't be read, or the guard itself fails or runs past its 5 s deadline), it refuses the text
-if it mentions Secret Manager (`MENTION`) and lets it through otherwise.
+shell reads commands from stdin or a process substitution, an alias is defined,
+a script it runs was written with `>` or `>>` by a command whose own words
+mention Secret Manager (`echo 'gcloud secrets …' > run.sh`), a script it runs
+is too long or can't be read, or the guard itself fails or runs past its 5 s
+deadline), it refuses the text if it mentions Secret Manager (`MENTION`) and
+lets it through otherwise.
 
 Not covered, by design: a command deliberately disguised to get past the guard
 (agents are trusted, board item 392); a script the guard can't find at its
@@ -110,7 +112,7 @@ DEPTH = 4
 # for a variable program and a URL, never for a script path), and every heredoc it writes to a
 # file, keyed by the target as spelled and as a literal path from the event's directory. A
 # script is read from each candidate, the disk included, and any that refuses refuses the command.
-# `redirected`: files that output from a command mentioning Secret Manager goes to
+# `redirected`: files written with `>` or `>>` by a command whose own words mention Secret Manager
 # (`echo 'gcloud secrets …' >> run.sh`), which the guard doesn't read; one of those run is unsure.
 STATE = {"vars": {}, "written": {}, "host": False, "redirected": set()}
 MAX_CANDIDATES = 64  # past this a variable's readings count as unsure
@@ -222,7 +224,6 @@ def gcloud_reason(args, mentioned, fed=False, later=False):
             if fed and mentioned:
                 return UNSURE
             continue
-        texts = [text for text, _ in words[1:3]]
         if not any(texts[:len(read)] == read for read in GCLOUD_READS):
             return GCLOUD
     return None
@@ -439,7 +440,7 @@ def script_reason(script, cwd, depth, mentioned):
     """A file a shell is told to run, whatever its name: what this command wrote to it, and
     what's on disk at its literal path, read from the caller's directory (where its commands
     run) and from its own (where a `cd "$(dirname "$0")"` takes them). A script the guard can't
-    find is a known gap (item 396); one that mention-bearing output went into is unsure."""
+    find is a known gap (item 396); one a mention-bearing command wrote with `>` is unsure."""
     if str(script) == "/dev/null":
         return None
     if re.match(r"[<>]\(|/dev/(stdin|fd/)|/proc/self/fd/", str(script)):
@@ -801,7 +802,7 @@ def message_for(why):
         "an ExternalSecret manifest. If you need a value set or changed, ask the user; don't work around this."
     )
     if why == UNSURE:
-        message += " If this command doesn't touch a secret value, write it more plainly (no variable or substitution as the program, no unclosed quotes, heredocs that end on their own line, a script that exists before the command runs rather than one it writes with echo) and run it again."
+        message += " If this command doesn't touch a secret value, write it more plainly and run it again: no variable or substitution as the program or as gcloud's command group, no unclosed quotes, heredocs that end on their own line, no shell reading commands from a pipe, a here-string or a process substitution, no alias, no `-c`/`eval` string built at run time, and a script that's already on disk rather than one the command writes with echo."
     return message
 
 
